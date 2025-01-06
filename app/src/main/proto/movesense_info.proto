@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+option java_package = "com.research.healthconnectplus";
+option java_multiple_files = true;
+
+message MovesenseInfo {
+    string name = 1;
+    string address = 2;
+}
