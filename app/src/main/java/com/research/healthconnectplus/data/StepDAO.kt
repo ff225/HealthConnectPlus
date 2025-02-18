@@ -10,7 +10,7 @@ import androidx.room.Update
 @Dao
 interface StepDAO {
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(stepRecord: StepRecord)
 
     @Update

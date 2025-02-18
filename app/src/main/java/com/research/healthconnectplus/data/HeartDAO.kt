@@ -9,7 +9,7 @@ import androidx.room.Update
 
 @Dao
 interface HeartDAO {
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(heartRecord: HeartRecord)
 
     @Update
