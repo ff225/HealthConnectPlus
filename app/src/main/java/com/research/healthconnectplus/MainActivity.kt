@@ -30,11 +30,12 @@ import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.research.healthconnectplus.screen.HomeScreen
 import com.research.healthconnectplus.screen.MyScaffold
 import com.research.healthconnectplus.screen.PermissionScreen
-import com.research.healthconnectplus.screen.movesense.MovesenseScreen
 import com.research.healthconnectplus.screen.StepScreen
+import com.research.healthconnectplus.screen.home.HomeScreen
+import com.research.healthconnectplus.screen.movesense.MovesenseScreen
+import com.research.healthconnectplus.screen.settings.SettingsScreen
 import com.research.healthconnectplus.ui.theme.HealthConnectTheme
 
 class MainActivity : ComponentActivity() {
@@ -101,6 +102,10 @@ class MainActivity : ComponentActivity() {
 
                     composable(HomeScreen.route) {
                         HomeScreen(navController)
+                    }
+
+                    composable(SettingsScreen.route) {
+                        SettingsScreen(navController)
                     }
 
                     composable(PermissionScreen.route) {
