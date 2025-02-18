@@ -49,14 +49,16 @@ import com.movesense.mds.MdsConnectionListener
 import com.movesense.mds.MdsException
 import com.research.healthconnectplus.PreferencesManager
 import com.research.healthconnectplus.bluetooth.MovesenseInfo
-import com.research.healthconnectplus.bluetooth.MovesensePair
 import com.research.healthconnectplus.screen.AppViewModelProvider
 import com.research.healthconnectplus.screen.MyScaffold
 import com.research.healthconnectplus.screen.RouteDestination
+import com.research.healthconnectplus.screen.home.HomeScreen
 import com.research.healthconnectplus.workers.MovesenseConfigWorker
 import com.research.healthconnectplus.workers.MovesenseStoreDataWorker
 import com.research.healthconnectplus.workers.SendDataToInflux
+import java.util.Timer
 import java.util.concurrent.TimeUnit
+import kotlin.concurrent.schedule
 
 object MovesenseScreen : RouteDestination {
     override val route: String = "movesense_screen"
@@ -67,6 +69,11 @@ object MovesenseScreen : RouteDestination {
 fun MovesenseScreen(navController: NavController? = null) {
     val context = LocalContext.current
 
+    val preferencesManager = PreferencesManager(context)
+
+    var collectMovesenseInfo by remember {
+        mutableStateOf(preferencesManager.getMovesenseInfo())
+    }
 
     val viewModel: MovesenseViewModel = viewModel(
         factory = AppViewModelProvider.provideMovesenseViewModelFactory(context)
@@ -150,22 +157,68 @@ fun MovesenseScreen(navController: NavController? = null) {
         showBackButton = true,
         navController = navController,
         actions = {
-            IconButton(onClick = {
-                viewModel.startScan()
+            if (collectMovesenseInfo.first == null) {
+                IconButton(onClick = {
+                    Timer().schedule(20000) {
+                        viewModel.stopScan()
+                    }
+                    viewModel.startScan()
 
-                // TODO stop discovery after 20s
-            }) {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = "Refresh"
-                )
+                }) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Refresh"
+                    )
+                }
             }
         }
     ) {
 
-        if (state.value.isConnected || MovesensePair.movesenseInfo?.isConnected == true) {
+        if (collectMovesenseInfo.first != null) {
             MovesenseSettingsScreen(
                 modifier = Modifier.padding(it),
+                isConnected = state.value.isConnected,
+                onConnect = { device ->
+                    mds.connect(device.address, object : MdsConnectionListener {
+                        override fun onConnect(p0: String?) {
+                            Log.d("Movesense", "onConnect: $p0")
+                            viewModel.stopScan()
+                        }
+
+                        override fun onConnectionComplete(p0: String?, p1: String?) {
+                            Log.d("Movesense", "onConnectionComplete: $p0, $p1")
+                            //viewModel.updateUi(false, true)
+                            //Movesense.init(device.name!!, device.address, true)
+
+                            preferencesManager.setMovesenseInfo(device.name, device.address)
+                            collectMovesenseInfo = preferencesManager.getMovesenseInfo()
+                            viewModel.updateConnectionStatus(true)
+                            viewModel.stopScan()
+                        }
+
+                        override fun onError(p0: MdsException?) {
+                            Log.e("Movesense", "onError: ${p0?.message}")
+                            //viewModel.updateUi()
+                            viewModel.stopScan()
+                            preferencesManager.resetMovesenseInfo()
+                            collectMovesenseInfo = preferencesManager.getMovesenseInfo()
+                            //MovesensePair.resetMovesenseInfo()
+                            viewModel.updateConnectionStatus(false)
+                        }
+
+                        override fun onDisconnect(p0: String?) {
+                            Log.d("Movesense", "onDisconnect: $p0")
+                            viewModel.stopScan()
+                            preferencesManager.resetMovesenseInfo()
+                            collectMovesenseInfo = preferencesManager.getMovesenseInfo()
+                            viewModel.updateConnectionStatus(false)
+                            //Movesense.reset()
+                            //viewModel.updateUi()
+                        }
+
+
+                    })
+                },
                 onStartLogging = {
                     WorkManager.getInstance(context).enqueue(
                         OneTimeWorkRequestBuilder<MovesenseConfigWorker>()
@@ -180,9 +233,9 @@ fun MovesenseScreen(navController: NavController? = null) {
                             .build()
                     )
 
+
                 },
                 onStopLogging = {
-                    // TODO show loading dialog while stopping logging
                     WorkManager.getInstance(context).enqueue(
                         OneTimeWorkRequestBuilder<MovesenseConfigWorker>()
                             .setInputData(workDataOf("startStopLogging" to false))
@@ -200,9 +253,13 @@ fun MovesenseScreen(navController: NavController? = null) {
                 onDisconnect = {
                     // stop logging and
                     WorkManager.getInstance(context).cancelAllWorkByTag("MovesenseStoreDataWorker")
-                    mds.disconnect(MovesensePair.movesenseInfo!!.address)
+                    mds.disconnect(collectMovesenseInfo.second!!)
                     viewModel.updateConnectionStatus(false)
-                    MovesensePair.resetMovesenseInfo()
+                    preferencesManager.resetMovesenseInfo()
+                    collectMovesenseInfo = preferencesManager.getMovesenseInfo()
+                    navController?.navigate(HomeScreen.route)
+
+
                 },
             )
         } else
@@ -221,7 +278,9 @@ fun MovesenseScreen(navController: NavController? = null) {
                             //viewModel.updateUi(false, true)
                             //Movesense.init(device.name!!, device.address, true)
 
-                            MovesensePair.initMovesenseInfo(device.name, device.address, true)
+                            preferencesManager.setMovesenseInfo(device.name, device.address)
+                            collectMovesenseInfo = preferencesManager.getMovesenseInfo()
+                            //MovesensePair.initMovesenseInfo(device.name, device.address, true)
                             viewModel.updateConnectionStatus(true)
                             viewModel.stopScan()
                         }
@@ -230,14 +289,18 @@ fun MovesenseScreen(navController: NavController? = null) {
                             Log.e("Movesense", "onError: ${p0?.message}")
                             //viewModel.updateUi()
                             viewModel.stopScan()
-                            MovesensePair.resetMovesenseInfo()
+                            preferencesManager.resetMovesenseInfo()
+                            collectMovesenseInfo = preferencesManager.getMovesenseInfo()
+                            //MovesensePair.resetMovesenseInfo()
                             viewModel.updateConnectionStatus(false)
                         }
 
                         override fun onDisconnect(p0: String?) {
                             Log.d("Movesense", "onDisconnect: $p0")
                             viewModel.stopScan()
-                            MovesensePair.resetMovesenseInfo()
+                            preferencesManager.resetMovesenseInfo()
+                            collectMovesenseInfo = preferencesManager.getMovesenseInfo()
+                            //MovesensePair.resetMovesenseInfo()
                             viewModel.updateConnectionStatus(false)
                             //Movesense.reset()
                             //viewModel.updateUi()
@@ -255,6 +318,8 @@ fun MovesenseScreen(navController: NavController? = null) {
 @Composable
 fun MovesenseSettingsScreen(
     modifier: Modifier = Modifier,
+    isConnected: Boolean = false,
+    onConnect: (MovesenseInfo) -> Unit,
     onStartLogging: () -> Unit = {},
     onStopLogging: () -> Unit = {},
     onFlushData: () -> Unit = {},
@@ -265,18 +330,39 @@ fun MovesenseSettingsScreen(
     val preferencesManager = PreferencesManager(context)
 
     var sendMovesenseData by remember {
-        mutableStateOf(preferencesManager.getSendMovesenseData())
+        mutableStateOf(preferencesManager.getCollectMovesenseData())
     }
+
+    val movesenseInfo by remember {
+        mutableStateOf(preferencesManager.getMovesenseInfo())
+    }
+
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Series of settings like frequency, sample rate, etc
 
-
+        if (!isConnected) {
+            Button(
+                onClick = {
+                    onConnect(
+                        MovesenseInfo(
+                            movesenseInfo.first!!,
+                            movesenseInfo.second!!
+                        )
+                    )
+                },
+                modifier = Modifier
+                    .padding(8.dp)
+                    .fillMaxWidth()
+            ) {
+                Text("Connect")
+            }
+        }
         Button(
             onClick = onStartLogging,
+            enabled = isConnected,
             modifier = Modifier
                 .padding(8.dp)
                 .fillMaxWidth()
@@ -285,7 +371,8 @@ fun MovesenseSettingsScreen(
         }
         Button(
             onClick = onStopLogging,
-            Modifier
+            enabled = isConnected,
+            modifier = Modifier
                 .padding(8.dp)
                 .fillMaxWidth()
         ) {
@@ -294,7 +381,8 @@ fun MovesenseSettingsScreen(
         }
         Button(
             onClick = onFlushData,
-            Modifier
+            enabled = isConnected,
+            modifier = Modifier
                 .padding(8.dp)
                 .fillMaxWidth()
         ) {
@@ -309,25 +397,31 @@ fun MovesenseSettingsScreen(
 
         ) {
             Text("Send periodically data to the server", Modifier.padding(8.dp))
-            Switch(checked = sendMovesenseData, onCheckedChange = { newValue ->
-                sendMovesenseData = newValue
-                preferencesManager.setSendMovesenseData(newValue)
+            Switch(
+                checked = sendMovesenseData,
+                enabled = isConnected,
+                onCheckedChange = { newValue ->
+                    sendMovesenseData = newValue
+                    preferencesManager.setCollectMovesenseData(newValue)
 
-                if (newValue) {
-                    WorkManager.getInstance(context)
-                        .enqueue(
-                            PeriodicWorkRequestBuilder<SendDataToInflux>(
-                                repeatInterval = 15, repeatIntervalTimeUnit = TimeUnit.MINUTES,
-                            ).setInputData(workDataOf("data" to 1))
-                                .setInitialDelay(15, TimeUnit.MINUTES)
-                                .addTag("SendMovesenseDataToInflux")
-                                .build()
-                        )
-                } else {
-                    WorkManager.getInstance(context).cancelAllWorkByTag("SendMovesenseDataToInflux")
-                }
+                    if (newValue) {
+                        WorkManager.getInstance(context)
+                            .enqueue(
+                                PeriodicWorkRequestBuilder<SendDataToInflux>(
+                                    repeatInterval = 15, repeatIntervalTimeUnit = TimeUnit.MINUTES,
+                                ).setInputData(workDataOf("data" to 1))
+                                    .setInitialDelay(15, TimeUnit.MINUTES)
+                                    .addTag("SendMovesenseDataToInflux")
+                                    .build()
+                            )
+                    } else {
+                        WorkManager.getInstance(context)
+                            .cancelAllWorkByTag("SendMovesenseDataToInflux")
+                    }
 
-            }, modifier = Modifier.padding(8.dp))
+                },
+                modifier = Modifier.padding(8.dp)
+            )
         }
 
         Button(
@@ -336,7 +430,7 @@ fun MovesenseSettingsScreen(
                 .padding(8.dp)
                 .fillMaxWidth()
         ) {
-            Text("Disconnect")
+            Text("Forget device")
         }
     }
 }
