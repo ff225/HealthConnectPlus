@@ -16,7 +16,7 @@ import com.movesense.mds.MdsException
 import com.movesense.mds.MdsHeader
 import com.movesense.mds.MdsResponseListener
 import com.research.healthconnectplus.HealthConnectApp
-import com.research.healthconnectplus.bluetooth.MovesensePair
+import com.research.healthconnectplus.PreferencesManager
 import com.research.healthconnectplus.data.MovesenseRecord
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +31,7 @@ class MovesenseStoreDataWorker(ctx: Context, params: WorkerParameters) :
     private val movesenseRepo =
         (ctx.applicationContext as HealthConnectApp).appRepoContainer.movesenseRepository
 
+    private val movesenseSerialId = PreferencesManager(ctx).getSerialId()
     private val workManager = WorkManager.getInstance(ctx)
 
     override suspend fun doWork(): Result {
@@ -52,7 +53,7 @@ class MovesenseStoreDataWorker(ctx: Context, params: WorkerParameters) :
         ).await()
 
         mds.get(
-            "suunto://${MovesensePair.getSerialId()}/Mem/Logbook/Entries/",
+            "suunto://${movesenseSerialId}/Mem/Logbook/Entries/",
             null,
             object : MdsResponseListener {
                 override fun onSuccess(data: String?, header: MdsHeader?) {
@@ -66,7 +67,7 @@ class MovesenseStoreDataWorker(ctx: Context, params: WorkerParameters) :
             })
 
         mds.get(
-            "suunto://MDS/Logbook/${MovesensePair.getSerialId()}/byId/1/Data",
+            "suunto://MDS/Logbook/${movesenseSerialId}/byId/1/Data",
             null,
             object : MdsResponseListener {
                 override fun onSuccess(data: String?, header: MdsHeader?) {

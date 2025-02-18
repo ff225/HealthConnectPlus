@@ -8,11 +8,13 @@ import com.movesense.mds.Mds
 import com.movesense.mds.MdsException
 import com.movesense.mds.MdsHeader
 import com.movesense.mds.MdsResponseListener
-import com.research.healthconnectplus.bluetooth.MovesensePair
+import com.research.healthconnectplus.PreferencesManager
 
 class MovesenseConfigWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
 
     private var mds: Mds = Mds.builder().build(ctx)
+
+    private val movesenseSerialId = PreferencesManager(ctx).getSerialId()
 
     override suspend fun doWork(): Result {
 
@@ -27,7 +29,7 @@ class MovesenseConfigWorker(ctx: Context, params: WorkerParameters) : CoroutineW
         if (startStopLogging) {
 
             mds.delete(
-                "suunto://${MovesensePair.getSerialId()}/Mem/Logbook/Entries/",
+                "suunto://${movesenseSerialId}/Mem/Logbook/Entries/",
                 null,
                 object : MdsResponseListener {
                     override fun onSuccess(data: String?, header: MdsHeader?) {
@@ -39,8 +41,7 @@ class MovesenseConfigWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                     }
                 })
 
-
-            mds.put("suunto://${MovesensePair.getSerialId()}/Time",
+            mds.put("suunto://${movesenseSerialId}/Time",
                 """{"value": ${System.currentTimeMillis() * 1_000}}""",
                 object : MdsResponseListener {
                     override fun onSuccess(data: String?, header: MdsHeader?) {
@@ -64,13 +65,13 @@ class MovesenseConfigWorker(ctx: Context, params: WorkerParameters) : CoroutineW
                             }
                         }"""
             mds.put(
-                "suunto://${MovesensePair.getSerialId()}/Mem/DataLogger/Config/",
+                "suunto://${movesenseSerialId}/Mem/DataLogger/Config/",
                 jsonConfig
             ) { p0 -> Log.d("MovesenseConfigWorker", "Error: ${p0?.message}") }
         }
         val jsonStartStopLogging = """{"newState": ${if (startStopLogging) "3" else "2"}}"""
         mds.put(
-            "suunto://${MovesensePair.getSerialId()}/Mem/DataLogger/State",
+            "suunto://${movesenseSerialId}/Mem/DataLogger/State",
             jsonStartStopLogging
         ) { p0 -> Log.d("MovesenseConfigWorker", "Error: ${p0?.message}") }
 
