@@ -11,6 +11,7 @@ import androidx.work.WorkerParameters
 import com.research.healthconnectplus.HealthConnectApp
 import com.research.healthconnectplus.data.HeartRepository
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 class HCReadHeartRate(context: Context, params: WorkerParameters) :
     CoroutineWorker(context, params) {
@@ -21,7 +22,7 @@ class HCReadHeartRate(context: Context, params: WorkerParameters) :
 
         readHeartRate(
             healthConnectClient,
-            Instant.now().minusSeconds(60 * 20),
+            Instant.now().minus(15, ChronoUnit.MINUTES),
             Instant.now(),
             heartRateRepo
         )
@@ -47,10 +48,10 @@ suspend fun readHeartRate(
             Log.d("HCReadHeartRate", "Heart rate: ${heartRateRecord.samples}")
             heartRateRepo.insert(
                 com.research.healthconnectplus.data.HeartRecord(
-                    0,
-                    heartRateRecord.samples.toString(),
-                    heartRateRecord.startTime.toEpochMilli(),
-                    heartRateRecord.endTime.toEpochMilli()
+                    recordId = heartRateRecord.metadata.id,
+                    bpm = heartRateRecord.samples.toString(),
+                    startTime = heartRateRecord.startTime.toEpochMilli(),
+                    endTime = heartRateRecord.endTime.toEpochMilli()
                 )
             )
         }

@@ -12,16 +12,18 @@ import com.research.healthconnectplus.HealthConnectApp
 import com.research.healthconnectplus.data.StepRecord
 import com.research.healthconnectplus.data.StepRepository
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 class HCReadSteps(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
     private val healthConnectClient = HealthConnectClient.getOrCreate(context)
-    private val stepRepo = (context.applicationContext as HealthConnectApp).appRepoContainer.stepRepository
+    private val stepRepo =
+        (context.applicationContext as HealthConnectApp).appRepoContainer.stepRepository
 
     override suspend fun doWork(): Result {
         readStepsByTimeRange(
             healthConnectClient,
-            Instant.now().minusSeconds(60 * 20),
+            Instant.now().minus(15, ChronoUnit.MINUTES),
             Instant.now(),
             stepRepo
         )
@@ -44,13 +46,12 @@ suspend fun readStepsByTimeRange(
         )
         for (stepRecord in response.records) {
             Log.d("HCReadSteps", "Step count: ${stepRecord.count}")
-            // Store in database
             stepRepo.insert(
                 StepRecord(
-                    0,
-                    stepRecord.count.toInt(),
-                    stepRecord.startTime.toEpochMilli(),
-                    stepRecord.endTime.toEpochMilli()
+                    recordId = stepRecord.metadata.id,
+                    count = stepRecord.count.toInt(),
+                    startTime = stepRecord.startTime.toEpochMilli(),
+                    endTime = stepRecord.endTime.toEpochMilli()
                 )
             )
 
