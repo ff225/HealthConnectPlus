@@ -8,13 +8,7 @@ import androidx.room.Query
 import androidx.room.Update
 
 @Dao
-interface StepDAO {
-
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insert(stepRecord: StepRecord)
-
-    @Update
-    suspend fun update(stepRecord: StepRecord)
+interface StepDAO : GenericDAO<StepRecord> {
 
     @Query("SELECT * FROM step_records WHERE is_synced = 0")
     suspend fun getUnsyncedStepRecords(): List<StepRecord>

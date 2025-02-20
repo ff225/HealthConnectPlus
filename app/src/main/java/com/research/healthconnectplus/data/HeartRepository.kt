@@ -1,15 +1,6 @@
 package com.research.healthconnectplus.data
 
-class HeartRepository(private val heartDAO: HeartDAO) {
-
-    suspend fun insert(heartRecord: HeartRecord) {
-        heartDAO.insert(heartRecord)
-
-    }
-    
-    suspend fun update(heartRecord: HeartRecord) {
-        heartDAO.update(heartRecord)
-    }
+class HeartRepository(private val heartDAO: HeartDAO) : GenericRepository<HeartRecord>(heartDAO) {
 
     suspend fun getUnsyncedHeartRecords(): List<HeartRecord> {
         return heartDAO.getUnsyncedHeartRecords()

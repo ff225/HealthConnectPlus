@@ -8,12 +8,7 @@ import androidx.room.Query
 import androidx.room.Update
 
 @Dao
-interface HeartDAO {
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insert(heartRecord: HeartRecord)
-
-    @Update
-    suspend fun update(heartRecord: HeartRecord)
+interface HeartDAO: GenericDAO<HeartRecord> {
 
     @Query("SELECT * FROM heart_records WHERE is_synced = 0")
     suspend fun getUnsyncedHeartRecords(): List<HeartRecord>
