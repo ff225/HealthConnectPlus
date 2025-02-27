@@ -76,7 +76,7 @@ fun MovesenseScreen(navController: NavController? = null) {
     }
 
     val viewModel: MovesenseViewModel = viewModel(
-        factory = AppViewModelProvider.provideMovesenseViewModelFactory(context)
+        factory = AppViewModelProvider.provideViewModelFactory(context)
     )
 
     var canEnableGeo by remember { mutableStateOf(false) }
