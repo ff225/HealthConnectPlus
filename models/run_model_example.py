@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 
 # Location of tflite model file
-model_path = "cnn_rightpocket_leftwrist.tflite"
+model_path = "cnn_rightpocket_leftwrist_rightankle.tflite"
 
 # Load TFLite model and allocate tensors.
 interpreter = tf.lite.Interpreter(model_path=model_path)
