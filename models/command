@@ -1,0 +1,4 @@
+python -m http.server 9000
+
+cmd /c run_interactive_tests.bat
+
