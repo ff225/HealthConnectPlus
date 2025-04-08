@@ -1,5 +1,5 @@
 from pydantic import BaseModel, field_validator, model_validator
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime
 
 class SenMLRecord(BaseModel):
@@ -45,7 +45,12 @@ class SenML(BaseModel):
     bu: Optional[str] = None
     user_id: Optional[str] = None
     execution_id: Optional[str] = None
+    selection_mode: Optional[Literal["all", "best", "named"]] = "all"
+    model_name: Optional[str] = None
     e: List[SenMLRecord]
+    model_config = {
+        "protected_namespaces": ()
+    }
 
     @property
     def effective_user_id(self) -> Optional[str]:

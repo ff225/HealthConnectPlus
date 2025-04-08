@@ -13,7 +13,6 @@ collection = client["healthconnect_db"]["model_mappings"]
 USER_ID_RUN = "test_user_run"
 USER_ID_NOSAVE = "test_user_nosave"
 
-
 def generate_senml_from_model(model_doc, exec_id, user_id):
     input_shape = model_doc["input_shape"]
     sensors = model_doc["sensors"]
@@ -52,12 +51,13 @@ def generate_senml_from_model(model_doc, exec_id, user_id):
 
 
 @pytest.mark.parametrize("model_doc", list(collection.find()))
-def test_full_pipeline(model_doc):
+@pytest.mark.parametrize("selection_mode", ["all", "best", "named"])
+def test_full_pipeline(model_doc, selection_mode):
     model_name = model_doc["model_name"]
-    print(f"\n===== MODELLO: {model_name} =====")
+    print(f"\n===== MODELLO: {model_name} | MODE: {selection_mode} =====")
 
-    exec_id_run = f"exec_run_{model_name.replace('.tflite', '')}"
-    exec_id_nosave = f"exec_nosave_{model_name.replace('.tflite', '')}"
+    exec_id_run = f"exec_run_{selection_mode}_{model_name.replace('.tflite', '')}"
+    exec_id_nosave = f"exec_nosave_{selection_mode}_{model_name.replace('.tflite', '')}"
 
     # Pulizia
     print("Pulizia InfluxDB...")
@@ -65,6 +65,9 @@ def test_full_pipeline(model_doc):
 
     # ======= RUNMODEL (con salvataggio) =======
     senml_run, debug_input_run = generate_senml_from_model(model_doc, exec_id_run, USER_ID_RUN)
+    senml_run["selection_mode"] = selection_mode
+    if selection_mode == "named":
+        senml_run["model_name"] = model_doc["model_name"]
 
     print("\n/saveData")
     resp = requests.post(f"{BASE_URL}/saveData", json=senml_run)
@@ -85,7 +88,7 @@ def test_full_pipeline(model_doc):
     print(f"/runModel → {len(run_result.get('results', []))} risultati restituiti")
     for r in run_result["results"]:
         print(f" {r['model_used'].split('/')[-1]}")
-        print(f"    Output (troncato): {str(r['output'])[:100].rstrip()}...")
+        print(f"    Output (troncato): {str(r.get('output', ''))[:100].rstrip()}...")
         print("    Input:")
         for (sensor, feat), values in debug_input_run.items():
             print(f"      {sensor}.{feat}: [{', '.join(map(str, values))}]")
@@ -94,7 +97,7 @@ def test_full_pipeline(model_doc):
     results = requests.get(f"{BASE_URL}/getResults", params={"user_id": USER_ID_RUN, "execution_id": exec_id_run}).json()["results"]
     print(f"\nNumero di modelli eseguiti: {len(results)}")
     for r in results:
-        print(f"  → Modello: {r['model_name']}, Sensor: {r['sensor']}, Exec: {r['execution_id']}")
+        print(f"  → Modello: {r['model_name']}, Sensor: {r['sensor']}")
         print(f"    Output (troncato): {str(r['result'])[:100].rstrip()}...")
 
     assert len(results) > 0
@@ -102,29 +105,27 @@ def test_full_pipeline(model_doc):
 
     # ======= RUNMODELNOSAVE (senza salvataggio) =======
     senml_nosave, debug_input_nosave = generate_senml_from_model(model_doc, exec_id_nosave, USER_ID_NOSAVE)
-
-    print("\n/saveData (per NoSave)")
-    resp = requests.post(f"{BASE_URL}/saveData", json=senml_nosave)
-    print(resp.status_code, resp.json())
-    assert resp.status_code == 200
-
-    print("Attesa 5 secondi...")
-    time.sleep(5)
+    senml_nosave["selection_mode"] = selection_mode
+    if selection_mode == "named":
+        senml_nosave["model_name"] = model_doc["model_name"]
 
     print("\n/runModelNoSave")
     no_save_result = requests.post(f"{BASE_URL}/runModelNoSave", json=senml_nosave).json()
     print(f"/runModelNoSave → {len(no_save_result.get('results', []))} modelli eseguiti senza salvataggio")
     for r in no_save_result["results"]:
         print(f"  {r['model_used'].split('/')[-1]}")
-        print(f"    Output (troncato): {str(r['result'])[:100].rstrip()}...")
+        print(f"    Output (troncato): {str(r.get('result', ''))[:100].rstrip()}...")
         print("    Input:")
         for (sensor, feat), values in debug_input_nosave.items():
             print(f"      {sensor}.{feat}: [{', '.join(map(str, values))}]")
 
     print("\n/getExecutionData")
-    exec_data = requests.get(f"{BASE_URL}/getExecutionData", params={"user_id": USER_ID_NOSAVE, "execution_id": exec_id_nosave}).json()
-    print(f"/getExecutionData → input: {len(exec_data['inputs'])} | output: {len(exec_data['outputs'])}")
+    exec_data = requests.get(f"{BASE_URL}/getExecutionData", params={
+        "user_id": USER_ID_NOSAVE,
+        "execution_id": exec_id_nosave
+    }).json()
 
+    print(f"/getExecutionData → input: {len(exec_data['inputs'])} | output: {len(exec_data['outputs'])}")
     print(" Verifica: dati temporanei eliminati dopo /runModelNoSave")
     assert exec_data["inputs"] == []
     assert exec_data["outputs"] == []

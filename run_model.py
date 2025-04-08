@@ -17,16 +17,38 @@ RETRY_DELAY = float(os.getenv("RETRY_DELAY", 3.0))
 
 
 def run_model_handler(data: SenML, save: bool = True) -> dict:
-    models_info = find_compatible_module(data)
-    if not models_info["models"]:
-        logger.info("Nessun modello compatibile trovato per user_id=%s", data.user_id or "anonymous")
+    user_id = data.effective_user_id
+    execution_id = data.effective_execution_id
+    selection_mode = data.selection_mode or "all"
+    requested_model = data.model_name
+
+    if not user_id or not execution_id:
+        raise HTTPException(status_code=400, detail="user_id e execution_id sono obbligatori")
+
+    compatible_models = find_compatible_module(data)["models"]
+    if not compatible_models:
         raise HTTPException(status_code=404, detail="Nessun modello compatibile trovato")
 
-    user_id = data.user_id or "anonymous"
-    execution_id = data.execution_id or "exec-" + os.urandom(4).hex()
+    # Selezione modelli in base alla modalità
+    if selection_mode == "named":
+        if not requested_model:
+            raise HTTPException(status_code=400, detail="model_name è richiesto in modalità 'named'")
+        selected = [m for m in compatible_models if m["model_name"] == requested_model]
+        if not selected:
+            raise HTTPException(status_code=404, detail=f"Modello richiesto '{requested_model}' non compatibile")
+        models_to_run = selected
+
+    elif selection_mode == "best":
+        sorted_models = sorted(compatible_models, key=lambda m: m.get("priority", 999))
+        models_to_run = [sorted_models[0]]
+
+    else:  # all
+        models_to_run = compatible_models
+
     results = []
 
-    for model in models_info["models"]:
+    for model in models_to_run:
+        model_name = model["model_name"]
         try:
             output = execute_model_for_metadata(model, user_id, execution_id)
             if save:
@@ -35,16 +57,19 @@ def run_model_handler(data: SenML, save: bool = True) -> dict:
                     output=output,
                     user_id=user_id,
                     execution_id=execution_id,
-                    model_name=model["model_name"]
+                    model_name=model_name
                 )
             results.append({
                 "model_used": model["url"],
+                "model_name": model_name,
                 "output": output.tolist()
             })
+            logger.info("Esecuzione e salvataggio completati per %s", model_name)
         except Exception as e:
             logger.error("Errore esecuzione modello %s: %s", model["url"], str(e))
             results.append({
                 "model_used": model["url"],
+                "model_name": model_name,
                 "error": str(e)
             })
 
@@ -55,35 +80,90 @@ def run_model_handler(data: SenML, save: bool = True) -> dict:
 
 
 def run_model_no_save_handler(data: SenML) -> dict:
-    for record in data.e:
-        if not record.user_id:
-            record.user_id = data.user_id
-        if not record.execution_id:
-            record.execution_id = data.execution_id
 
     user_id = data.effective_user_id
     execution_id = data.effective_execution_id
+    selection_mode = data.selection_mode or "all"
+    requested_model = data.model_name
 
     if not user_id or not execution_id:
         raise HTTPException(status_code=400, detail="user_id e execution_id sono obbligatori")
 
-    compatible_models = find_compatible_module(data)
-    if not compatible_models["models"]:
+    for record in data.e:
+        if not record.user_id:
+            record.user_id = user_id
+        if not record.execution_id:
+            record.execution_id = execution_id
+
+    compatible_models = find_compatible_module(data)["models"]
+    if not compatible_models:
         raise HTTPException(status_code=404, detail="Nessun modello compatibile trovato")
 
+    # Selezione in base alla modalità
+    if selection_mode == "named":
+        if not requested_model:
+            raise HTTPException(status_code=400, detail="model_name è richiesto in modalità 'named'")
+        selected = [m for m in compatible_models if m["model_name"] == requested_model]
+        if not selected:
+            raise HTTPException(status_code=404, detail=f"Modello richiesto '{requested_model}' non compatibile")
+        models_to_run = selected
+
+    elif selection_mode == "best":
+        sorted_models = sorted(compatible_models, key=lambda m: m.get("priority", 999))
+        models_to_run = [sorted_models[0]]
+
+    else:  # all
+        models_to_run = compatible_models
+
+    # Riorganizza dati per modello
+    sensor_data_map = {}
+    for record in data.e:
+        sensor = record.bn
+        feature = record.n[0]
+        value = record.v
+        if sensor and feature and isinstance(value, (int, float)):
+            sensor_data_map.setdefault(sensor, {}).setdefault(feature, []).append(value)
+
     results = []
-    for model_meta in compatible_models["models"]:
+    for model_meta in models_to_run:
         model_name = model_meta["model_name"]
+        input_shape = model_meta["input_shape"]
+        structured_features = model_meta["features"]
+
         try:
-            result_array = execute_model_for_metadata(model_meta, user_id=user_id, execution_id=execution_id)
-            result_serializable = result_array.tolist()
+            local_path = os.path.join(tempfile.gettempdir(), model_name)
+            if not os.path.exists(local_path):
+                response = requests.get(model_meta["url"], timeout=10)
+                response.raise_for_status()
+                with open(local_path, "wb") as f:
+                    f.write(response.content)
+
+            combined_data = []
+            for (sensor, feats) in structured_features:
+                partial_shape = [input_shape[0], input_shape[1], len(feats)]
+                total_vals = partial_shape[0] * partial_shape[1]
+
+                values = []
+                for feature in feats:
+                    v = sensor_data_map.get(sensor, {}).get(feature, [])
+                    if len(v) < total_vals:
+                        raise ValueError(f"Dati insufficienti per {sensor}/{feature}: {len(v)} < {total_vals}")
+                    values.append(v[:total_vals])
+
+                values_np = np.array(values, dtype=np.float32).T
+                reshaped = values_np.reshape(partial_shape)
+                combined_data.append(reshaped)
+
+            input_tensor = np.concatenate(combined_data, axis=-1)
+            output = load_and_run_model(local_path, input_tensor)
 
             results.append({
                 "model_name": model_name,
-                "model_used": model_meta.get("url"),
-                "result": result_serializable
+                "model_used": model_meta["url"],
+                "result": output.tolist()
             })
             logger.info("Esecuzione modello %s completata", model_name)
+
         except Exception as e:
             logger.warning("Errore nell'esecuzione di %s: %s", model_name, str(e))
             results.append({
@@ -91,10 +171,6 @@ def run_model_no_save_handler(data: SenML) -> dict:
                 "model_used": model_meta.get("url"),
                 "error": str(e)
             })
-
-    # Cancellazione sia degli input che degli output dopo esecuzione
-    delete_data_influx(user_id=user_id, execution_id=execution_id)
-    logger.info("Dati input e output eliminati dopo runModelNoSave per user_id=%s, execution_id=%s", user_id, execution_id)
 
     return {"results": results}
 
