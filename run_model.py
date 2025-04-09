@@ -5,6 +5,7 @@ import requests
 import numpy as np
 import time
 from fastapi import HTTPException
+
 from models import SenML
 from crud import find_compatible_module
 from influxdbfun import save_model_output_to_influx, delete_data_influx
@@ -12,11 +13,24 @@ from processor import get_feature_data, load_and_run_model
 
 logger = logging.getLogger(__name__)
 
+# Numero massimo di retry in caso di dati non ancora disponibili
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", 15))
+# Attesa tra un retry e l'altro (in secondi)
 RETRY_DELAY = float(os.getenv("RETRY_DELAY", 3.0))
 
 
 def run_model_handler(data: SenML, save: bool = True) -> dict:
+    """
+    Esegue uno o più modelli TFLite sui dati salvati precedentemente in InfluxDB.
+    I risultati possono essere opzionalmente salvati.
+
+    Args:
+        data (SenML): Dati contenenti user_id, execution_id e parametri di selezione modelli.
+        save (bool): Se True, i risultati verranno salvati su InfluxDB.
+
+    Returns:
+        dict: Risultati dell'esecuzione per ciascun modello.
+    """
     user_id = data.effective_user_id
     execution_id = data.effective_execution_id
     selection_mode = data.selection_mode or "all"
@@ -25,11 +39,12 @@ def run_model_handler(data: SenML, save: bool = True) -> dict:
     if not user_id or not execution_id:
         raise HTTPException(status_code=400, detail="user_id e execution_id sono obbligatori")
 
+    # Seleziona i modelli compatibili con i dati disponibili
     compatible_models = find_compatible_module(data)["models"]
     if not compatible_models:
         raise HTTPException(status_code=404, detail="Nessun modello compatibile trovato")
 
-    # Selezione modelli in base alla modalità
+    # Filtra i modelli in base alla modalità scelta
     if selection_mode == "named":
         if not requested_model:
             raise HTTPException(status_code=400, detail="model_name è richiesto in modalità 'named'")
@@ -47,10 +62,13 @@ def run_model_handler(data: SenML, save: bool = True) -> dict:
 
     results = []
 
+    # Esegue ciascun modello
     for model in models_to_run:
         model_name = model["model_name"]
         try:
             output = execute_model_for_metadata(model, user_id, execution_id)
+
+            # Salvataggio su InfluxDB se richiesto
             if save:
                 save_model_output_to_influx(
                     sensor="_".join(model["sensors"]),
@@ -65,6 +83,7 @@ def run_model_handler(data: SenML, save: bool = True) -> dict:
                 "output": output.tolist()
             })
             logger.info("Esecuzione e salvataggio completati per %s", model_name)
+
         except Exception as e:
             logger.error("Errore esecuzione modello %s: %s", model["url"], str(e))
             results.append({
@@ -80,7 +99,16 @@ def run_model_handler(data: SenML, save: bool = True) -> dict:
 
 
 def run_model_no_save_handler(data: SenML) -> dict:
+    """
+    Esegue uno o più modelli TFLite utilizzando direttamente i dati forniti nel payload,
+    senza accedere a InfluxDB e senza salvare i risultati.
 
+    Args:
+        data (SenML): Dati completi per l'esecuzione in tempo reale.
+
+    Returns:
+        dict: Risultati o errori per ciascun modello eseguito.
+    """
     user_id = data.effective_user_id
     execution_id = data.effective_execution_id
     selection_mode = data.selection_mode or "all"
@@ -89,17 +117,18 @@ def run_model_no_save_handler(data: SenML) -> dict:
     if not user_id or not execution_id:
         raise HTTPException(status_code=400, detail="user_id e execution_id sono obbligatori")
 
+    # Assicura che tutti i record abbiano user_id e execution_id
     for record in data.e:
         if not record.user_id:
             record.user_id = user_id
         if not record.execution_id:
             record.execution_id = execution_id
 
+    # Seleziona modelli compatibili con i dati forniti direttamente
     compatible_models = find_compatible_module(data)["models"]
     if not compatible_models:
         raise HTTPException(status_code=404, detail="Nessun modello compatibile trovato")
 
-    # Selezione in base alla modalità
     if selection_mode == "named":
         if not requested_model:
             raise HTTPException(status_code=400, detail="model_name è richiesto in modalità 'named'")
@@ -115,7 +144,7 @@ def run_model_no_save_handler(data: SenML) -> dict:
     else:  # all
         models_to_run = compatible_models
 
-    # Riorganizza dati per modello
+    # Riorganizza i dati dal payload in una struttura: {sensor: {feature: [valori]}}
     sensor_data_map = {}
     for record in data.e:
         sensor = record.bn
@@ -131,6 +160,7 @@ def run_model_no_save_handler(data: SenML) -> dict:
         structured_features = model_meta["features"]
 
         try:
+            # Scarica il modello localmente se non è già presente
             local_path = os.path.join(tempfile.gettempdir(), model_name)
             if not os.path.exists(local_path):
                 response = requests.get(model_meta["url"], timeout=10)
@@ -138,6 +168,7 @@ def run_model_no_save_handler(data: SenML) -> dict:
                 with open(local_path, "wb") as f:
                     f.write(response.content)
 
+            # Prepara i dati in base alla struttura richiesta dal modello
             combined_data = []
             for (sensor, feats) in structured_features:
                 partial_shape = [input_shape[0], input_shape[1], len(feats)]
@@ -154,6 +185,7 @@ def run_model_no_save_handler(data: SenML) -> dict:
                 reshaped = values_np.reshape(partial_shape)
                 combined_data.append(reshaped)
 
+            # Concatena i dati su asse feature
             input_tensor = np.concatenate(combined_data, axis=-1)
             output = load_and_run_model(local_path, input_tensor)
 
@@ -176,6 +208,17 @@ def run_model_no_save_handler(data: SenML) -> dict:
 
 
 def execute_model_for_metadata(model_meta: dict, user_id: str, execution_id: str) -> np.ndarray:
+    """
+    Funzione interna per eseguire un modello a partire dai suoi metadati e dai dati salvati su InfluxDB.
+
+    Args:
+        model_meta (dict): Metadati del modello (url, input_shape, features, ecc.).
+        user_id (str): ID utente.
+        execution_id (str): ID esecuzione.
+
+    Returns:
+        np.ndarray: Output del modello.
+    """
     model_url = model_meta["url"]
     model_name = model_meta["model_name"]
     input_shape = model_meta["input_shape"]
@@ -183,6 +226,7 @@ def execute_model_for_metadata(model_meta: dict, user_id: str, execution_id: str
 
     logger.info("Esecuzione modello %s per exec_id=%s", model_name, execution_id)
 
+    # Scarica il modello nella cache temporanea se non esiste
     local_path = os.path.join(tempfile.gettempdir(), model_name)
     if not os.path.exists(local_path):
         response = requests.get(model_url, timeout=10)
@@ -193,6 +237,8 @@ def execute_model_for_metadata(model_meta: dict, user_id: str, execution_id: str
     combined_data = []
     for (sensor, feats) in structured_features:
         partial_shape = [input_shape[0], input_shape[1], len(feats)]
+
+        # Retry loop per attendere dati completi
         for attempt in range(MAX_RETRIES):
             try:
                 sensor_data = get_feature_data(sensor, feats, partial_shape, user_id=user_id, execution_id=execution_id)

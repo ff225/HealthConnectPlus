@@ -8,34 +8,37 @@ logger = logging.getLogger(__name__)
 def find_compatible_module(data: SenML) -> Dict[str, Any]:
     """
     Restituisce tutti i modelli compatibili con i dati forniti.
-    Un modello è compatibile se tutti i sensori richiesti sono presenti,
-    e per ognuno di essi sono disponibili le feature richieste.
-    Sono inclusi modelli che utilizzano un sottoinsieme dei sensori presenti.
+    Un modello è considerato compatibile se:
+    - Tutti i sensori richiesti dal modello sono presenti nei dati ricevuti.
+    - Per ogni sensore richiesto, sono disponibili tutte le feature attese.
+    Sono inclusi anche i modelli che richiedono un sottoinsieme dei sensori presenti nei dati.
     """
 
-    # Mappa: sensore → set(feature disponibili) dai dati in ingresso
+    # Costruisce un dizionario: {nome_sensore: set(feature disponibili)}
     sensor_features = {}
     for entry in data.e:
-        if entry.bn:
+        if entry.bn:  # Assicura che il sensore sia definito
             sensor_features.setdefault(entry.bn, set()).update(entry.n)
 
-    matching_models = []
+    matching_models = []  # Elenco dei modelli compatibili
 
+    # Itera su tutti i modelli registrati nel database
     for model in collectionM.find():
-        model_sensors = model.get("sensors", [])
-        model_features = model.get("features", [])
-        input_shape = model.get("input_shape", [1, 1])
-        url = model.get("url")
+        model_sensors = model.get("sensors", [])         # Lista dei sensori richiesti dal modello
+        model_features = model.get("features", [])       # Lista delle feature richieste (per sensore)
+        input_shape = model.get("input_shape", [1, 1])   # Shape di input del modello (usata per validazioni successive)
+        url = model.get("url")                           # URL o path al file .tflite
 
+        # Controllo integrità dei metadati del modello
         if not model_sensors or not model_features or not url:
             logger.warning("Modello incompleto o malformato: %s", model.get("model_name", ""))
             continue
 
-        structured_features = []
-        is_compatible = True
+        structured_features = []  # Elenco strutturato: [(sensore, [feature...]), ...]
+        is_compatible = True      # Flag di compatibilità inizialmente positivo
 
         try:
-            # Multi-sensore: lista di liste
+            # CASO 1: modello multi-sensore → model_features è una lista di liste
             if isinstance(model_features[0], list):
                 if len(model_sensors) != len(model_features):
                     logger.warning("Incoerenza tra sensori e feature in %s", model.get("model_name", ""))
@@ -44,11 +47,12 @@ def find_compatible_module(data: SenML) -> Dict[str, Any]:
                 for sensor, feats in zip(model_sensors, model_features):
                     input_feats = sensor_features.get(sensor, set())
                     if not input_feats or not set(feats).issubset(input_feats):
+                        # Se mancano feature richieste per un sensore, il modello non è compatibile
                         is_compatible = False
                         break
                     structured_features.append((sensor, feats))
 
-            # Singolo sensore
+            # CASO 2: modello a singolo sensore → model_features è una lista piatta
             else:
                 sensor = model_sensors[0]
                 feats = model_features
@@ -58,6 +62,7 @@ def find_compatible_module(data: SenML) -> Dict[str, Any]:
                 else:
                     structured_features.append((sensor, feats))
 
+            # Se compatibile, aggiunge il modello all’elenco dei candidati
             if is_compatible:
                 matching_models.append({
                     "url": url,
@@ -70,6 +75,7 @@ def find_compatible_module(data: SenML) -> Dict[str, Any]:
                 })
 
         except Exception as e:
+            # Log di errore in caso di fallimento nella logica di compatibilità
             logger.warning("Errore compatibilità modello %s: %s", model.get("model_name", ""), str(e))
             continue
 
