@@ -1,0 +1,25 @@
+import os, sys, json
+
+file_path = "results/results_runModel.jsonl"
+
+if not os.path.exists(file_path):
+    print("[ERRORE] File dei risultati non trovato.")
+    sys.exit(1)
+
+with open(file_path, "r", encoding="utf-8") as f:
+    lines = f.readlines()
+
+if not lines:
+    print("[ERRORE] File dei risultati vuoto.")
+    sys.exit(1)
+
+# Controlla le ultime 5 righe
+recent_entries = [json.loads(line) for line in lines[-5:] if line.strip()]
+valid = any(e.get("status_code") == 200 and e.get("exec_time_ms", 0) > 0 for e in recent_entries)
+
+if valid:
+    print("✓ Almeno un risultato valido trovato per /runModel.")
+    sys.exit(0)
+else:
+    print("[ERRORE] Nessun risultato valido nelle ultime 5 righe.")
+    sys.exit(1)

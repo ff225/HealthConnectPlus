@@ -28,7 +28,7 @@ def get_feature_data(sensor: str, fields: list[str], input_shape: list[int], use
         # Costruisce la query Flux per estrarre i dati corrispondenti alla feature
         query = f'''
         from(bucket: "{INFLUXDB_BUCKET}")
-          |> range(start: -15m)
+          |> range(start: 0)
           |> filter(fn: (r) => r["_measurement"] == "Sensor_data")
           |> filter(fn: (r) => r["sensor"] == "{sensor}")
           |> filter(fn: (r) => r["_field"] == "{field}")

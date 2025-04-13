@@ -1,4 +1,10 @@
-python -m http.server 9000
+python -m http.server 9000 #comando da usare in /models per dare un link per scaricare i models (per test)
 
-cmd /c run_interactive_tests.bat
+setting per influxd per successo con i Locust (saveData con 100 utenti)
+set INFLUXD_HTTP_READ_TIMEOUT=30s #tempo massimo per leggere una richiesta HTTP completa
+set INFLUXD_HTTP_WRITE_TIMEOUT=30s #tempo massimo concesso per scrivere la risposta al client
+set INFLUXD_HTTP_IDLE_TIMEOUT=300s #tempo una connessione HTTP può rimanere aperta
+set INFLUXD_HTTP_MAX_BODY_SIZE=0 #nessun limite body size
 
+comando per l'esecuzione della API per testare, con file di "log" per controllare l'andamento
+uvicorn main:app --host 127.0.0.1 --port 8000 --workers 8 > uvicorn_log.log 2>&1

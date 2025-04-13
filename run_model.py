@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from models import SenML
 from crud import find_compatible_module
-from influxdbfun import save_model_output_to_influx, delete_data_influx
+from influxdbfun import save_model_output_to_influx
 from processor import get_feature_data, load_and_run_model
 
 logger = logging.getLogger(__name__)
@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", 15))
 # Attesa tra un retry e l'altro (in secondi)
 RETRY_DELAY = float(os.getenv("RETRY_DELAY", 3.0))
-
 
 def run_model_handler(data: SenML, save: bool = True) -> dict:
     """
@@ -66,7 +65,9 @@ def run_model_handler(data: SenML, save: bool = True) -> dict:
     for model in models_to_run:
         model_name = model["model_name"]
         try:
+            start_exec = time.perf_counter()
             output = execute_model_for_metadata(model, user_id, execution_id)
+            exec_time_ms = (time.perf_counter() - start_exec) * 1000
 
             # Salvataggio su InfluxDB se richiesto
             if save:
@@ -80,7 +81,8 @@ def run_model_handler(data: SenML, save: bool = True) -> dict:
             results.append({
                 "model_used": model["url"],
                 "model_name": model_name,
-                "output": output.tolist()
+                "output": output.tolist(),
+                "exec_time_ms": exec_time_ms
             })
             logger.info("Esecuzione e salvataggio completati per %s", model_name)
 
@@ -89,14 +91,14 @@ def run_model_handler(data: SenML, save: bool = True) -> dict:
             results.append({
                 "model_used": model["url"],
                 "model_name": model_name,
-                "error": str(e)
+                "error": str(e),
+                "exec_time_ms": 0
             })
 
     return {
         "execution_id": execution_id,
         "results": results
     }
-
 
 def run_model_no_save_handler(data: SenML) -> dict:
     """
@@ -117,14 +119,12 @@ def run_model_no_save_handler(data: SenML) -> dict:
     if not user_id or not execution_id:
         raise HTTPException(status_code=400, detail="user_id e execution_id sono obbligatori")
 
-    # Assicura che tutti i record abbiano user_id e execution_id
     for record in data.e:
         if not record.user_id:
             record.user_id = user_id
         if not record.execution_id:
             record.execution_id = execution_id
 
-    # Seleziona modelli compatibili con i dati forniti direttamente
     compatible_models = find_compatible_module(data)["models"]
     if not compatible_models:
         raise HTTPException(status_code=404, detail="Nessun modello compatibile trovato")
@@ -144,7 +144,6 @@ def run_model_no_save_handler(data: SenML) -> dict:
     else:  # all
         models_to_run = compatible_models
 
-    # Riorganizza i dati dal payload in una struttura: {sensor: {feature: [valori]}}
     sensor_data_map = {}
     for record in data.e:
         sensor = record.bn
@@ -160,7 +159,6 @@ def run_model_no_save_handler(data: SenML) -> dict:
         structured_features = model_meta["features"]
 
         try:
-            # Scarica il modello localmente se non è già presente
             local_path = os.path.join(tempfile.gettempdir(), model_name)
             if not os.path.exists(local_path):
                 response = requests.get(model_meta["url"], timeout=10)
@@ -168,7 +166,6 @@ def run_model_no_save_handler(data: SenML) -> dict:
                 with open(local_path, "wb") as f:
                     f.write(response.content)
 
-            # Prepara i dati in base alla struttura richiesta dal modello
             combined_data = []
             for (sensor, feats) in structured_features:
                 partial_shape = [input_shape[0], input_shape[1], len(feats)]
@@ -185,14 +182,16 @@ def run_model_no_save_handler(data: SenML) -> dict:
                 reshaped = values_np.reshape(partial_shape)
                 combined_data.append(reshaped)
 
-            # Concatena i dati su asse feature
             input_tensor = np.concatenate(combined_data, axis=-1)
+            start_exec = time.perf_counter()
             output = load_and_run_model(local_path, input_tensor)
+            exec_time_ms = (time.perf_counter() - start_exec) * 1000
 
             results.append({
                 "model_name": model_name,
                 "model_used": model_meta["url"],
-                "result": output.tolist()
+                "result": output.tolist(),
+                "exec_time_ms": exec_time_ms
             })
             logger.info("Esecuzione modello %s completata", model_name)
 
@@ -201,11 +200,11 @@ def run_model_no_save_handler(data: SenML) -> dict:
             results.append({
                 "model_name": model_name,
                 "model_used": model_meta.get("url"),
-                "error": str(e)
+                "error": str(e),
+                "exec_time_ms": 0
             })
 
     return {"results": results}
-
 
 def execute_model_for_metadata(model_meta: dict, user_id: str, execution_id: str) -> np.ndarray:
     """
@@ -226,7 +225,6 @@ def execute_model_for_metadata(model_meta: dict, user_id: str, execution_id: str
 
     logger.info("Esecuzione modello %s per exec_id=%s", model_name, execution_id)
 
-    # Scarica il modello nella cache temporanea se non esiste
     local_path = os.path.join(tempfile.gettempdir(), model_name)
     if not os.path.exists(local_path):
         response = requests.get(model_url, timeout=10)
@@ -238,7 +236,6 @@ def execute_model_for_metadata(model_meta: dict, user_id: str, execution_id: str
     for (sensor, feats) in structured_features:
         partial_shape = [input_shape[0], input_shape[1], len(feats)]
 
-        # Retry loop per attendere dati completi
         for attempt in range(MAX_RETRIES):
             try:
                 sensor_data = get_feature_data(sensor, feats, partial_shape, user_id=user_id, execution_id=execution_id)
