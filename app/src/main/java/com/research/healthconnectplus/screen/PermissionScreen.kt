@@ -26,6 +26,7 @@ import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.navigation.NavController
+import com.research.healthconnectplus.screen.home.HomeScreen
 
 
 object PermissionScreen : RouteDestination {
@@ -68,6 +69,7 @@ fun PermissionScreen(navController: NavController? = null) {
                     HealthPermission.getWritePermission(HeartRateRecord::class),
                     HealthPermission.getReadPermission(StepsRecord::class),
                     HealthPermission.getWritePermission(StepsRecord::class)
+                    // TODO add more permissions here
                 )
             )
             Log.d("PermissionScreen", "Health permissions granted: $areHealthPermissionsGranted")
