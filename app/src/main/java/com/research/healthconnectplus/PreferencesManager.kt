@@ -6,12 +6,36 @@ class PreferencesManager(context: Context) {
     private val sharedPreferences =
         context.getSharedPreferences("health_connect_plus", Context.MODE_PRIVATE)
 
+    fun getEnabledHealthDataTypes(): Set<String> {
+        return sharedPreferences.getStringSet("enabled_health_data_types", emptySet()) ?: emptySet()
+    }
+
+    private fun removeHealthDataType(type: String) {
+        val types = getEnabledHealthDataTypes().toMutableSet()
+        types.remove(type)
+        sharedPreferences.edit().putStringSet("enabled_health_data_types", types).apply()
+    }
+
+    private fun addHealthDataType(type: String) {
+        val types = getEnabledHealthDataTypes().toMutableSet()
+        types.add(type)
+        sharedPreferences.edit().putStringSet("enabled_health_data_types", types).apply()
+    }
+
     fun setCollectStepData(sendData: Boolean) {
         sharedPreferences.edit().putBoolean("send_step_data", sendData).apply()
+        when (sendData) {
+            true -> addHealthDataType("steps")
+            false -> removeHealthDataType("steps")
+        }
     }
 
     fun setCollectHeartRateData(sendData: Boolean) {
         sharedPreferences.edit().putBoolean("send_heart_rate_data", sendData).apply()
+        when (sendData) {
+            true -> addHealthDataType("heart_rate")
+            false -> removeHealthDataType("heart_rate")
+        }
     }
 
     fun getCollectStepData(): Boolean {
@@ -20,6 +44,18 @@ class PreferencesManager(context: Context) {
 
     fun getCollectHeartRateData(): Boolean {
         return sharedPreferences.getBoolean("send_heart_rate_data", false)
+    }
+
+    fun setCollectBloodPressureData(sendData: Boolean) {
+        sharedPreferences.edit().putBoolean("send_blood_pressure_data", sendData).apply()
+        when (sendData) {
+            true -> addHealthDataType("blood_pressure")
+            false -> removeHealthDataType("blood_pressure")
+        }
+    }
+
+    fun getCollectBloodPressureData(): Boolean {
+        return sharedPreferences.getBoolean("send_blood_pressure_data", false)
     }
 
     fun setCollectMovesenseData(sendData: Boolean) {
