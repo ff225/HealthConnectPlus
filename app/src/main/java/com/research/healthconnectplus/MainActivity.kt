@@ -35,6 +35,8 @@ import com.research.healthconnectplus.screen.PermissionScreen
 import com.research.healthconnectplus.screen.StepScreen
 import com.research.healthconnectplus.screen.home.HomeScreen
 import com.research.healthconnectplus.screen.movesense.MovesenseScreen
+import com.research.healthconnectplus.screen.profile.ProfileScreen
+import com.research.healthconnectplus.screen.settings.DataSettingsScreen
 import com.research.healthconnectplus.screen.settings.SettingsScreen
 import com.research.healthconnectplus.ui.theme.HealthConnectTheme
 
@@ -106,6 +108,15 @@ class MainActivity : ComponentActivity() {
 
                     composable(SettingsScreen.route) {
                         SettingsScreen(navController)
+                    }
+
+                    composable(ProfileScreen.route) {
+                        ProfileScreen(navController = navController)
+                    }
+
+                    composable(DataSettingsScreen.route) {
+                        val dataType = it.arguments?.getString("dataType") ?: "heart_rate"
+                        DataSettingsScreen(dataType, navController = navController)
                     }
 
                     composable(PermissionScreen.route) {
