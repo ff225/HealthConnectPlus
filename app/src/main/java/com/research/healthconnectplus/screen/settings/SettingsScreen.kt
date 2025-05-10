@@ -55,6 +55,7 @@ fun SettingsScreen(navController: NavController? = null) {
     val context = LocalContext.current
     val preferencesManager = PreferencesManager(context)
 
+
     var collectStepsData by remember {
         mutableStateOf(preferencesManager.getCollectStepData())
     }
@@ -63,12 +64,20 @@ fun SettingsScreen(navController: NavController? = null) {
         mutableStateOf(preferencesManager.getCollectHeartRateData())
     }
 
+    var collectBloodPressureData by remember {
+        mutableStateOf(preferencesManager.getCollectBloodPressureData())
+    }
+
     MyScaffold(
         title = SettingsScreen.title,
         showBackButton = true,
         navController = navController,
     ) {
-        Column(Modifier.padding(it).fillMaxSize()) {
+        Column(
+            Modifier
+                .padding(it)
+                .fillMaxSize()
+        ) {
             Text(
                 "Activate or deactivate data collection",
                 fontSize = 20.sp,
@@ -78,9 +87,14 @@ fun SettingsScreen(navController: NavController? = null) {
                     .padding(8.dp)
                     .fillMaxWidth()
             )
+
+            //  clickable to open specific screen
             SettingsScreenContent(
                 "Heart Rate",
                 collectHeartData,
+                toDataSettings = {
+                    navController?.navigate(DataSettingsScreen.createRoute("heart_rate"))
+                },
                 updateStatus = { newStatus ->
                     collectHeartData = newStatus
                     preferencesManager.setCollectHeartRateData(newStatus)
@@ -109,6 +123,9 @@ fun SettingsScreen(navController: NavController? = null) {
             SettingsScreenContent(
                 "Steps",
                 collectStepsData,
+                toDataSettings = {
+                    navController?.navigate(DataSettingsScreen.createRoute("steps"))
+                },
                 updateStatus = { newStatus ->
                     collectStepsData = newStatus
                     preferencesManager.setCollectStepData(newStatus)
@@ -133,6 +150,19 @@ fun SettingsScreen(navController: NavController? = null) {
                                         "Step data collection stopped"
                                     )
                                 }
+                    }
+                }
+            )
+            SettingsScreenContent(
+                "Blood Pressure",
+                collectBloodPressureData,
+                updateStatus = { newStatus ->
+                    collectBloodPressureData = newStatus
+                    preferencesManager.setCollectBloodPressureData(newStatus)
+
+                    when (newStatus) {
+                        true -> Log.d("SettingsScreen", "Blood Pressure data collection started")
+                        false -> Log.d("SettingsScreen", "Blood Pressure data collection stopped")
                     }
                 }
             )
@@ -176,13 +206,17 @@ fun SettingsScreenPreview() {
 fun SettingsScreenContent(
     hcType: String = "",
     collect: Boolean = false,
-    updateStatus: (Boolean) -> Unit = {}
+    updateStatus: (Boolean) -> Unit = {},
+    toDataSettings: () -> Unit = {},
 ) {
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(8.dp)
+            .clickable {
+                toDataSettings()
+            }
     ) {
         Row(
             modifier = Modifier
