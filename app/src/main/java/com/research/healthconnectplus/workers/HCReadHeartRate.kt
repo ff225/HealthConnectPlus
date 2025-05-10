@@ -44,6 +44,7 @@ suspend fun readHeartRate(
                 timeRangeFilter = TimeRangeFilter.between(startTime, endTime)
             )
         )
+        // TODO bpm not correctly parsed
         for (heartRateRecord in response.records) {
             Log.d("HCReadHeartRate", "Heart rate: ${heartRateRecord.samples}")
             heartRateRepo.insert(
