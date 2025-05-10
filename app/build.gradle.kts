@@ -73,10 +73,14 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 
-    implementation("androidx.health.connect:connect-client:1.1.0-alpha07")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+
+    implementation("androidx.health.connect:connect-client:1.1.0-alpha08")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("androidx.navigation:navigation-compose:2.8.3")
+
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.3")
 
     // Movesense
     implementation("com.polidea.rxandroidble2:rxandroidble:1.10.2")
