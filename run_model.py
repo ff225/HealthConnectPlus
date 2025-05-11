@@ -51,7 +51,6 @@ def prepare_model_local(model_meta: dict) -> str:
     model_url = model_meta["url"]
     model_name = model_meta["model_name"]
 
-    # Se è un path locale assoluto o in /app/models
     if model_url.startswith("/") or model_url.startswith("file://"):
         local_path = model_url.replace("file://", "")
         if not os.path.exists(local_path):
@@ -59,7 +58,6 @@ def prepare_model_local(model_meta: dict) -> str:
         logger.info(f"[LOCALE] Uso modello locale: {local_path}")
         return local_path
 
-    # Altrimenti, scarica da URL remoto
     local_path = os.path.join(tempfile.gettempdir(), model_name)
     if not os.path.exists(local_path):
         logger.info(f"[REMOTE] Scaricamento modello {model_name} da {model_url}")
