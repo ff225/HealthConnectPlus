@@ -1,0 +1,71 @@
+services:
+  fastapi_app:
+    build: .
+    container_name: fastapi_app
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - ./tests_locust:/app/tests_locust
+    env_file:
+      - .env
+    depends_on:
+      pg_queue:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+    command: >
+      sh -c "
+      gunicorn -w 8 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:8000 --timeout 120 & 
+      python save_worker_pg.py & 
+      python save_worker_pg.py & 
+      python save_worker_pg.py & 
+      python save_worker_pg.py & 
+      python save_worker_pg.py & 
+      python save_worker_pg.py & 
+      python save_worker_pg.py & 
+      python save_worker_pg.py &&
+      wait
+      "
+
+  pg_queue:
+    image: postgres:15
+    container_name: pg_queue
+    restart: always
+    environment:
+      - POSTGRES_DB=${PG_DB}
+      - POSTGRES_USER=${PG_USER}
+      - POSTGRES_PASSWORD=${PG_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U api -d api_queue || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+  influxdb:
+    image: influxdb:2.7
+    container_name: influxdb
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=adminadmin
+      - DOCKER_INFLUXDB_INIT_ORG=${INFLUXDB_ORG}
+      - DOCKER_INFLUXDB_INIT_BUCKET=${INFLUXDB_BUCKET}
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUXDB_TOKEN}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pg_data:
+  influxdb_data:

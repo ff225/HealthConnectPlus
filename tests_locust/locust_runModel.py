@@ -1,92 +1,77 @@
 from locust import HttpUser, task, between
-import os, json, random
-from time import perf_counter
-from datetime import datetime
+import random, time, uuid, json, os
+from datetime import datetime, timedelta
+from pathlib import Path
 
-# Mappa sensori → modello fisso compatibile
-FIXED_MODEL_BY_SENSOR_COUNT = {
-    1: "cnn_leftwrist.tflite",
-    2: "cnn_rightpocket_leftwrist.tflite",
-    3: "cnn_rightpocket_leftwrist_rightankle.tflite",
-    4: "cnn_rightpocket_leftwrist_rightankle_chest.tflite"
+SENSOR_OPTIONS = {
+    1: ["leftwrist"],
+    2: ["rightpocket", "leftwrist"],
+    3: ["rightpocket", "leftwrist", "rightankle"],
+    4: ["rightpocket", "leftwrist", "rightankle", "chest"],
 }
 
+FEATURES = ["accX", "accY", "accZ", "gyroX", "gyroY", "gyroZ"]
+INPUT_SHAPE = (32, 50)  # 1600 valori
+SELECTION_MODE = "best"
+RESULTS_FOLDER = Path("results")
+RESULTS_FOLDER.mkdir(exist_ok=True)
+
+SENSOR_COUNT = int(os.getenv("SENSOR_COUNT", "1"))
+ITERATION = int(os.getenv("ITERATION", "0"))
+
 class RunModelUser(HttpUser):
-    wait_time = between(1, 2)
-    host = "http://127.0.0.1:8000"
+    wait_time = between(0.005, 0.010)
 
     @task
     def run_model(self):
-        sensor_count = int(os.getenv("SENSOR_COUNT", 1))
-        model_name = FIXED_MODEL_BY_SENSOR_COUNT.get(sensor_count)
-        if not model_name:
-            print(f"[ERRORE] Nessun modello fisso definito per {sensor_count} sensori")
-            return
+        user_id = str(uuid.uuid4())
+        execution_id = str(uuid.uuid4())
+        sensors = SENSOR_OPTIONS[SENSOR_COUNT]
+        now = datetime.utcnow()
 
-        # Legge i dati generati da /saveData
-        try:
-            with open("results/results_saveData.jsonl", "r") as f:
-                lines = f.readlines()
-        except FileNotFoundError:
-            print("[ERRORE] File results_saveData.jsonl non trovato.")
-            return
+        entries = []
+        for sensor in sensors:
+            for feature in FEATURES:
+                for i in range(INPUT_SHAPE[0] * INPUT_SHAPE[1]):
+                    entry = {
+                        "bn": sensor,
+                        "n": [feature],
+                        "v": round(random.uniform(-10, 10), 3),
+                        "t": (now + timedelta(milliseconds=i)).isoformat() + "Z",
+                        "user_id": user_id,
+                        "execution_id": execution_id
+                    }
+                    entries.append(entry)
 
-        # Filtra solo quelli con lo stesso numero di sensori e status 200
-        valid_entries = []
-        for line in lines:
-            try:
-                entry = json.loads(line)
-                if entry.get("status_code") == 200 and entry.get("sensor_count") == sensor_count:
-                    valid_entries.append(entry)
-            except json.JSONDecodeError:
-                continue
-
-        if not valid_entries:
-            print(f"[ERRORE] Nessun salvataggio valido trovato per {sensor_count} sensori.")
-            return
-
-        selected = random.choice(valid_entries)
-        user_id = selected["user_id"]
-        execution_id = selected["execution_id"]
-
-        # Costruisce il payload per /runModel
         payload = {
-            "bt": datetime.utcnow().timestamp(),
+            "bt": now.timestamp(),
             "user_id": user_id,
             "execution_id": execution_id,
-            "selection_mode": "named",
-            "model_name": model_name,
-            "e": []  # Non serve passare dati: verranno recuperati da InfluxDB
+            "selection_mode": SELECTION_MODE,
+            "e": entries
         }
 
-        start = perf_counter()
-        response = self.client.post("/runModel", json=payload)
-        latency = (perf_counter() - start) * 1000
+        start = time.perf_counter()
+        with self.client.post("/runModel", json=payload, catch_response=True) as resp:
+            duration = (time.perf_counter() - start) * 1000
+            result = {
+                "users": self.environment.runner.user_count if self.environment.runner else 0,
+                "sensors": SENSOR_COUNT,
+                "iteration": ITERATION,
+                "response_time": duration,
+                "status_code": resp.status_code,
+            }
+            try:
+                json_data = resp.json()
+                if "results" in json_data:
+                    for res in json_data["results"]:
+                        result["exec_time_ms"] = res.get("exec_time_ms", 0)
+                        break
+            except Exception:
+                result["exec_time_ms"] = 0
 
-        try:
-            response_data = response.json()
-        except Exception:
-            response_data = {}
+            filename = RESULTS_FOLDER / f"runModel_results.jsonl"
+            with open(filename, "a") as f:
+                f.write(json.dumps(result) + "\n")
 
-        exec_time = 0
-        if isinstance(response_data, dict):
-            results = response_data.get("results", [])
-            if results:
-                exec_time = results[0].get("exec_time_ms", 0)
-
-        result = {
-            "timestamp": datetime.utcnow().isoformat(),
-            "endpoint": "/runModel",
-            "status_code": response.status_code,
-            "latency_ms": latency,
-            "exec_time_ms": exec_time,
-            "sensor_count": sensor_count,
-            "users": self.environment.runner.user_count if self.environment and self.environment.runner else None,
-            "user_id": user_id,
-            "execution_id": execution_id,
-            "response": response_data if response.status_code == 200 else response.text
-        }
-
-        os.makedirs("results", exist_ok=True)
-        with open("results/results_runModel.jsonl", "a") as f:
-            f.write(json.dumps(result) + "\n")
+            resp.success()

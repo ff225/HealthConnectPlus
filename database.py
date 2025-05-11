@@ -1,17 +1,31 @@
-from influxdb_client import InfluxDBClient
+import os
 from pymongo import MongoClient
+from influxdb_client import InfluxDBClient
 
-INFLUXDB_TOKEN = "jf-r7Bz78njetwULkCAYJrGfh22yb28sariPO13Jf-uxbAEvaiKkQzWhhS3t2RxwSZT7EAOk91WEPeU4bcZN-A=="
-INFLUXDB_URL = "http://localhost:8086"
-INFLUXDB_ORG = "Unimore"
-INFLUXDB_BUCKET = "healthconnect"
-INFLUXDB_RESULTS_BUCKET = "model_results"
-
-clientI = InfluxDBClient(url=INFLUXDB_URL, token=INFLUXDB_TOKEN, org=INFLUXDB_ORG)
-write_api = clientI.write_api(synchronous=True)
-query_api = clientI.query_api()
-
-MONGO_URI = "mongodb+srv://272519:bSVDnlDZVVEes2hJ@cluster0.0ow6b.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+# --- MongoDB --- #
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 clientM = MongoClient(MONGO_URI)
 dbM = clientM["healthconnect_db"]
 collectionM = dbM["model_mappings"]
+
+# --- InfluxDB --- #
+INFLUXDB_URL = os.getenv("INFLUXDB_URL")
+INFLUXDB_TOKEN = os.getenv("INFLUXDB_TOKEN")
+INFLUXDB_ORG = os.getenv("INFLUXDB_ORG")
+INFLUXDB_BUCKET = os.getenv("INFLUXDB_BUCKET")
+INFLUXDB_RESULTS_BUCKET = os.getenv("INFLUXDB_RESULTS_BUCKET")
+
+_influx_client = InfluxDBClient(
+    url=INFLUXDB_URL,
+    token=INFLUXDB_TOKEN,
+    org=INFLUXDB_ORG,
+    timeout=60000,
+    enable_gzip=True,
+    retries=5,
+    max_retry_delay=10000
+)
+
+query_api = _influx_client.query_api()
+write_api = _influx_client.write_api()
+delete_api = _influx_client.delete_api()
+influx_client = _influx_client

@@ -1,224 +1,165 @@
 import logging
-import json
+from time import sleep
 from datetime import datetime
-from fastapi import HTTPException
-from influxdb_client import Point, InfluxDBClient
-from influxdb_client.client.exceptions import InfluxDBError
-from models import SenML
-from database import (
-    write_api,
-    query_api,
-    INFLUXDB_BUCKET,
-    INFLUXDB_RESULTS_BUCKET,
-    INFLUXDB_ORG,
-    INFLUXDB_URL,
-    INFLUXDB_TOKEN
-)
+from typing import List
+from influxdb_client import Point
+from influxdb_client.client.write_api import SYNCHRONOUS
 
+from database import influx_client, INFLUXDB_ORG as ORG, INFLUXDB_BUCKET as BUCKET_DATA, INFLUXDB_RESULTS_BUCKET as BUCKET_RESULTS
+from models import SenML
+
+# Logger
 logger = logging.getLogger(__name__)
 
-
-def save_data_to_influx(data: SenML):
+# --- FUNZIONE: salvataggio dati sensoriali (Sensor_data) --- #
+def save_data_to_influx(data: SenML) -> int:
     """
-    Salva i dati grezzi dei sensori su InfluxDB.
-    Ogni record viene convertito in un punto InfluxDB e scritto nel bucket principale.
+    Salva i dati SenML nel bucket 'healthconnect' di InfluxDB.
     """
+    write_api = influx_client.write_api(write_options=SYNCHRONOUS)
     points = []
-    user_id = data.user_id or "anonymous"  # Default se non specificato
 
     for record in data.e:
-        try:
-            feature_name = record.n[0]  # Nome della feature
-            if record.v is None or not isinstance(record.v, (int, float)):
-                continue  # Salta valori non validi
+        if not (record.bn and record.n and record.t is not None):
+            continue  # Skippa record incompleti
 
-            point = (
-                Point("Sensor_data")
-                .tag("sensor", record.bn or "unknown")  # Tag per sensore
-                .tag("user_id", user_id)                # Tag per utente
-                .tag("execution_id", record.execution_id or "none")  # Tag per esecuzione
-                .field(feature_name, float(record.v))   # Feature e valore
-                .field("unit", record.u or "")          # Eventuale unità di misura
-                .time(record.t or datetime.utcnow())    # Timestamp
-            )
-            points.append(point)
-        except Exception as e:
-            logger.warning("Errore nella creazione del punto InfluxDB: %s", e)
+        user_id = record.user_id or data.user_id or "anonymous"
+        execution_id = record.execution_id or data.execution_id or "none"
 
-    if points:
-        BATCH_SIZE = 1000  # Scrittura batch per efficienza
-        for i in range(0, len(points), BATCH_SIZE):
-            batch = points[i:i + BATCH_SIZE]
-            write_api.write(bucket=INFLUXDB_BUCKET, record=batch)
-            logger.info("Scritti %d punti (batch %d)", len(batch), i // BATCH_SIZE + 1)
-
-        write_api.flush()  # Forza lo svuotamento del buffer
-        logger.info("%d punti totali salvati per user_id=%s", len(points), user_id)
-    else:
-        logger.warning("Nessun punto valido da salvare")
-
-
-def save_model_output_to_influx(sensor: str, output, user_id: str = "anonymous", execution_id: str = "none", model_name: str = "unknown"):
-    """
-    Salva l'output del modello su InfluxDB (bucket dei risultati).
-    L'output è serializzato in formato JSON.
-    """
-    try:
-        logger.info("Salvataggio output modello %s per %s (user_id=%s, execution_id=%s)", model_name, sensor, user_id, execution_id)
         point = (
-            Point("ModelOutput")
-            .tag("sensor", sensor)
+            Point("sensor_data")
+            .tag("sensor", record.bn)
             .tag("user_id", user_id)
             .tag("execution_id", execution_id)
-            .tag("model_name", model_name)
-            .field("result", json.dumps(output.tolist()))  # Serializza output (es. array NumPy)
-            .time(datetime.utcnow())
+            .field(record.n[0], record.v if record.v is not None else 0.0)
+            .time(record.t)
         )
-        write_api.write(bucket=INFLUXDB_RESULTS_BUCKET, record=point)
-        logger.info("Output salvato correttamente per %s", sensor)
+        points.append(point)
+
+    if not points:
+        logger.warning("Nessun punto valido da salvare")
+        return 0
+
+    max_retries = 5
+    retry_delay = 0.5
+
+    for attempt in range(max_retries):
+        try:
+            write_api.write(bucket=BUCKET_DATA, org=ORG, record=points)
+            logger.info(f"Salvati {len(points)} punti su InfluxDB (bucket={BUCKET_DATA})")
+            return len(points)
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Tentativo {attempt+1}/{max_retries} fallito: {e}")
+                sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                logger.error(f"Errore definitivo salvataggio dati sensoriali: {e}")
+                raise
+
+    return 0
+
+# --- FUNZIONE: salvataggio output modelli (Model_output) --- #
+def save_model_output_to_influx(points: List[dict]) -> None:
+    """
+    Salva l'output del modello nel bucket 'model_results' di InfluxDB.
+    """
+    write_api = influx_client.write_api(write_options=SYNCHRONOUS)
+
+    max_retries = 5
+    retry_delay = 0.5
+
+    for attempt in range(max_retries):
+        try:
+            for point in points:
+                p = Point("model_output")
+                for key, value in point.items():
+                    if key == "output":
+                        p = p.field(key, value)
+                    else:
+                        p = p.tag(key, value)
+                write_api.write(bucket=BUCKET_RESULTS, org=ORG, record=p)
+            logger.info(f"Salvati {len(points)} output modello su InfluxDB (bucket={BUCKET_RESULTS})")
+            break
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Tentativo {attempt+1}/{max_retries} fallito output: {e}")
+                sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                logger.error(f"Errore definitivo salvataggio output modello: {e}")
+                raise
+
+# --- FUNZIONE: cancellazione dati utente --- #
+def delete_data_influx(user_id: str, execution_id: str) -> None:
+    """
+    Cancella dati sensoriali dal bucket 'healthconnect' per user_id e execution_id.
+    """
+    delete_api = influx_client.delete_api()
+
+    start = "1970-01-01T00:00:00Z"
+    stop = datetime.utcnow().isoformat() + "Z"
+    predicate = f'_measurement="sensor_data" AND user_id="{user_id}" AND execution_id="{execution_id}"'
+
+    try:
+        delete_api.delete(start, stop, predicate, bucket=BUCKET_DATA, org=ORG)
+        logger.info(f"Cancellati dati per user_id={user_id}, execution_id={execution_id} dal bucket {BUCKET_DATA}")
     except Exception as e:
-        logger.error("Errore durante il salvataggio output: %s", e)
+        logger.error(f"Errore cancellazione dati InfluxDB: {e}")
+        raise
 
+# --- FUNZIONE: recupero ultimi risultati modello --- #
+def get_latest_results(sensor: str = None, user_id: str = None, execution_id: str = None, model_name: str = None, hours: int = 2) -> list:
+    """
+    Recupera i risultati recenti del modello filtrati per user_id ed execution_id.
+    """
+    query_api = influx_client.query_api()
 
-def get_latest_results(sensor: str = None, user_id: str = None, execution_id: str = None, hours: int = 2, model_name: str = None):
-    """
-    Recupera gli output dei modelli eseguiti nelle ultime N ore.
-    I risultati possono essere filtrati per sensore, utente, esecuzione e modello.
-    """
     query = f'''
-    from(bucket: "{INFLUXDB_RESULTS_BUCKET}")
-      |> range(start: -{hours}h)
-      |> filter(fn: (r) => r["_measurement"] == "ModelOutput")
+    from(bucket: "{BUCKET_RESULTS}")
+      |> range(start: -4d)
+      |> filter(fn: (r) => r["_measurement"] == "model_output")
+      |> filter(fn: (r) => r["user_id"] == "{user_id}")
+      |> filter(fn: (r) => r["execution_id"] == "{execution_id}")
+      |> pivot(rowKey:["_time"], columnKey: ["feature"], valueColumn: "_value")
     '''
-    # Applica filtri opzionali
-    if sensor:
-        query += f'|> filter(fn: (r) => r["sensor"] == "{sensor}")\n'
     if user_id:
-        query += f'|> filter(fn: (r) => r["user_id"] == "{user_id}")\n'
+        query += f'  |> filter(fn: (r) => r["user_id"] == "{user_id}")\n'
     if execution_id:
-        query += f'|> filter(fn: (r) => r["execution_id"] == "{execution_id}")\n'
+        query += f'  |> filter(fn: (r) => r["execution_id"] == "{execution_id}")\n'
     if model_name:
-        query += f'|> filter(fn: (r) => r["model_name"] == "{model_name}")\n'
-    query += '|> sort(columns: ["_time"])'
+        query += f'  |> filter(fn: (r) => r["model_name"] == "{model_name}")\n'
+    if sensor:
+        query += f'  |> filter(fn: (r) => r["sensor"] == "{sensor}")\n'
 
-    results = []
+    query += '  |> pivot(rowKey:["_time"], columnKey: ["feature"], valueColumn: "_value")\n'
     try:
-        tables = query_api.query(query)
-        for table in tables:
-            for r in table.records:
-                results.append({
-                    "time": r.get_time().isoformat(),
-                    "sensor": r.values.get("sensor"),
-                    "user_id": r.values.get("user_id"),
-                    "execution_id": r.values.get("execution_id"),
-                    "model_name": r.values.get("model_name", ""),
-                    "result": r.get_value()
-                })
+        tables = query_api.query(query=query, org=ORG)
+        return [record.values for table in tables for record in table.records]
     except Exception as e:
-        logger.error("Errore nella query /getResults: %s", e)
+        logger.error(f"Errore recupero risultati modello: {e}")
+        return []
 
-    return {"count": len(results), "results": results}
-
-
-def get_execution_data(user_id: str = None, execution_id: str = None):
+# --- FUNZIONE: recupero dati sensoriali grezzi --- #
+def get_execution_data(user_id: str, execution_id: str) -> list:
     """
-    Recupera sia i dati grezzi sia i risultati per una specifica esecuzione,
-    filtrando per user_id ed execution_id.
+    Recupera dati sensoriali salvati in InfluxDB per una esecuzione specifica.
     """
+    query_api = influx_client.query_api()
 
-    def build_query(bucket: str, measurement: str):
-        # Costruisce una query parametrica su misura
-        q = f'''
-        from(bucket: "{bucket}")
-          |> range(start: -12h)
-          |> filter(fn: (r) => r["_measurement"] == "{measurement}")
-        '''
-        if user_id:
-            q += f'|> filter(fn: (r) => r["user_id"] == "{user_id}")\n'
-        if execution_id:
-            q += f'|> filter(fn: (r) => r["execution_id"] == "{execution_id}")\n'
-        return q + '|> sort(columns: ["_time"])'
-
-    input_data, output_data = [], []
-
-    # Recupera dati grezzi dei sensori
-    try:
-        for r in query_api.query(build_query(INFLUXDB_BUCKET, "Sensor_data")):
-            for row in r.records:
-                input_data.append({
-                    "type": "input",
-                    "time": row.get_time().isoformat(),
-                    "sensor": row.values.get("sensor"),
-                    "user_id": row.values.get("user_id"),
-                    "execution_id": row.values.get("execution_id"),
-                    "field": row.get_field(),
-                    "value": row.get_value()
-                })
-    except Exception as e:
-        logger.error("Errore lettura input: %s", e)
-
-    # Recupera output del modello
-    try:
-        for r in query_api.query(build_query(INFLUXDB_RESULTS_BUCKET, "ModelOutput")):
-            for row in r.records:
-                output_data.append({
-                    "type": "output",
-                    "time": row.get_time().isoformat(),
-                    "sensor": row.values.get("sensor"),
-                    "user_id": row.values.get("user_id"),
-                    "execution_id": row.values.get("execution_id"),
-                    "model_name": row.values.get("model_name", ""),
-                    "result": row.get_value()
-                })
-    except Exception as e:
-        logger.error("Errore lettura output: %s", e)
-
-    return {
-        "execution_id": execution_id,
-        "user_id": user_id,
-        "inputs": input_data,
-        "outputs": output_data
-    }
-
-
-def delete_data_influx(user_id: str = None, execution_id: str = None):
-    """
-    Elimina i dati da InfluxDB, sia input che output, in base a user_id ed execution_id.
-    Se non specificati, elimina tutti i dati.
-    """
-    client = InfluxDBClient(
-        url=INFLUXDB_URL,
-        token=INFLUXDB_TOKEN,
-        org=INFLUXDB_ORG,
-        timeout=60_000  # 60 secondi
-    )
-
-    delete_api = client.delete_api()
-    start, stop = "1970-01-01T00:00:00Z", "2100-01-01T00:00:00Z"
-
-    # Costruisce il predicato di cancellazione per input e output
-    pred_input = '_measurement="Sensor_data"'
-    pred_output = '_measurement="ModelOutput"'
-
-    if user_id and execution_id:
-        pred_input += f' AND user_id="{user_id}" AND execution_id="{execution_id}"'
-        pred_output += f' AND user_id="{user_id}" AND execution_id="{execution_id}"'
+    query = f'''
+    from(bucket: "{BUCKET_DATA}")
+      |> range(start: -4d)
+      |> filter(fn: (r) => r["_measurement"] == "sensor_data")
+      |> filter(fn: (r) => r["user_id"] == "{user_id}")
+      |> filter(fn: (r) => r["execution_id"] == "{execution_id}")
+      |> pivot(rowKey:["_time"], columnKey: ["feature"], valueColumn: "_value")
+      |> sort(columns: ["_time"])
+    '''
 
     try:
-        delete_api.delete(start, stop, bucket=INFLUXDB_BUCKET, org=INFLUXDB_ORG, predicate=pred_input)
-        delete_api.delete(start, stop, bucket=INFLUXDB_RESULTS_BUCKET, org=INFLUXDB_ORG, predicate=pred_output)
-        logger.info("Dati eliminati: %s / %s", pred_input, pred_output)
-    except InfluxDBError as e:
-        logger.exception("Errore InfluxDB durante eliminazione")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Errore InfluxDB: {getattr(e, 'code', 'unknown')} - {getattr(e, 'message', str(e))}"
-        )
+        tables = query_api.query(query=query, org=ORG)
+        return [record.values for table in tables for record in table.records]
     except Exception as e:
-        logger.exception("Errore sconosciuto durante eliminazione")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Errore interno durante la cancellazione dati: {str(e)}"
-        )
-    finally:
-        client.close()
+        logger.error(f"Errore recupero dati esecuzione: {e}")
+        return []

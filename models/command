@@ -5,6 +5,14 @@ set INFLUXD_HTTP_READ_TIMEOUT=30s #tempo massimo per leggere una richiesta HTTP 
 set INFLUXD_HTTP_WRITE_TIMEOUT=30s #tempo massimo concesso per scrivere la risposta al client
 set INFLUXD_HTTP_IDLE_TIMEOUT=300s #tempo una connessione HTTP può rimanere aperta
 set INFLUXD_HTTP_MAX_BODY_SIZE=0 #nessun limite body size
+set INFLUXD_BOLT_PATH=influxd.bolt
+set INFLUXD_ENGINE_PATH=influxd.engine
+set INFLUXD_STORAGE_MAX_CONCURRENT_COMPACTIONS=10
+set INFLUXD_STORAGE_CACHE_MAX_MEMORY_SIZE=1073741824
 
 comando per l'esecuzione della API per testare, con file di "log" per controllare l'andamento
 uvicorn main:app --host 127.0.0.1 --port 8000 --workers 8 > uvicorn_log.log 2>&1
+
+uvicorn main:app --host 127.0.0.1 --port 8000 --workers 4 --backlog 2048 --timeout-keep-alive 60 --limit-concurrency 200 --limit-max-requests 0 > uvicorn_log.log 2>&1
+
+chmod +x /app/tests_locust/run_all_tests.sh

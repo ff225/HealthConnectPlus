@@ -2,22 +2,37 @@ from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional, List, Literal
 from datetime import datetime
 
-class SenMLRecord(BaseModel):
-    # Rappresenta una singola misurazione secondo lo standard SenML
 
-    bn: Optional[str] = None  # Base name del sensore (es. "leftwrist", "rightpocket") – obbligatorio per identificare la sorgente
-    n: List[str]              # Nome della feature misurata, contenuto in una lista con un solo elemento (es. ["accx"])
-    v: Optional[float] = None # Valore numerico della misurazione
-    vs: Optional[str] = None  # Valore stringa della misurazione
-    u: Optional[str] = None   # Unità di misura (es. "m/s2", "g")
-    t: Optional[datetime] = None  # Timestamp ISO8601 della misurazione – obbligatorio per il tracciamento temporale
-    execution_id: Optional[str] = None  # ID dell’esecuzione associata al dato – per tracciabilità
-    user_id: Optional[str] = None       # ID dell’utente associato al dato – per contesto multiutente
+class SenMLRecord(BaseModel):
+    """
+    Rappresenta una singola misurazione SenML.
+
+    - `n` può essere fornito come lista di una sola stringa **oppure** come stringa
+      semplice; in quest’ultimo caso viene convertito internamente in lista.
+    """
+
+    bn: Optional[str] = None           # Nome del sensore (es. "leftwrist")
+    n: List[str]                       # Feature misurata (lista di lunghezza 1)
+    v: Optional[float] = None          # Valore numerico
+    vs: Optional[str] = None           # Valore stringa
+    u: Optional[str] = None            # Unità di misura
+    t: Optional[datetime] = None       # Timestamp ISO‑8601
+    execution_id: Optional[str] = None # ID esecuzione
+    user_id: Optional[str] = None      # ID utente
+
+    # --- VALIDAZIONI ---------------------------------------------------------
+
+    @field_validator("n", mode="before")
+    @classmethod
+    def coerce_n_to_list(cls, v):
+        # Consente sia "accX" che ["accX"]
+        if isinstance(v, str):
+            return [v]
+        return v
 
     @field_validator("n")
     @classmethod
     def check_single_feature(cls, v):
-        # Verifica che 'n' contenga una sola feature
         if not isinstance(v, list) or len(v) != 1:
             raise ValueError("Il campo 'n' deve essere una lista contenente una sola feature")
         return v
@@ -25,53 +40,44 @@ class SenMLRecord(BaseModel):
     @field_validator("v")
     @classmethod
     def check_value_is_numeric(cls, v):
-        # Verifica che 'v' sia numerico se presente
-        if not isinstance(v, (int, float)):
+        if v is not None and not isinstance(v, (int, float)):
             raise ValueError("Il campo 'v' deve essere numerico")
         return v
 
     @field_validator("t")
     @classmethod
     def check_time_present(cls, v):
-        # Verifica che il campo 't' (timestamp) sia presente
         if v is None:
             raise ValueError("Il campo 't' (timestamp) è obbligatorio")
         return v
 
     @model_validator(mode="after")
     def check_required_fields(self):
-        # Verifica che 'bn' (nome del sensore) sia presente
         if not self.bn:
             raise ValueError("Il campo 'bn' (sensore) è obbligatorio")
         return self
 
 
 class SenML(BaseModel):
-    # Rappresenta un pacchetto completo di misurazioni secondo SenML
+    """
+    Pacchetto completo di misurazioni SenML.
+    """
 
-    bt: float  # Base time: riferimento temporale per tutte le misurazioni
-    bu: Optional[str] = None  # Unità di misura globale per i valori, se non definita nei singoli record
-    user_id: Optional[str] = None       # ID dell’utente associato al pacchetto di dati
-    execution_id: Optional[str] = None  # ID dell’esecuzione associata al pacchetto
+    bt: float                                   # Base time
+    bu: Optional[str] = None                    # Unità di misura globale
+    user_id: Optional[str] = None
+    execution_id: Optional[str] = None
     selection_mode: Optional[Literal["all", "best", "named"]] = "all"
-    # Modalità di selezione dei modelli:
-    # - "all": tutti i modelli compatibili
-    # - "best": il modello migliore
-    # - "named": solo quello specificato in 'model_name'
+    model_name: Optional[str] = None
+    e: List[SenMLRecord]
 
-    model_name: Optional[str] = None  # Nome del modello da usare (richiesto se selection_mode == "named")
-    e: List[SenMLRecord]              # Elenco delle misurazioni (record) associate al pacchetto
+    model_config = {"protected_namespaces": ()}
 
-    model_config = {
-        "protected_namespaces": ()  # Permette l’uso di proprietà personalizzate (es. effective_user_id)
-    }
-
+    # Helpers per ricavare l'utente / esecuzione effettivi
     @property
     def effective_user_id(self) -> Optional[str]:
-        # Restituisce lo user_id prioritario: prima dal pacchetto, poi dal primo record disponibile
         return self.user_id or next((r.user_id for r in self.e if r.user_id), None)
 
     @property
     def effective_execution_id(self) -> Optional[str]:
-        # Restituisce l’execution_id prioritario: prima dal pacchetto, poi dal primo record disponibile
         return self.execution_id or next((r.execution_id for r in self.e if r.execution_id), None)
