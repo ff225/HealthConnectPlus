@@ -14,23 +14,29 @@ from queue_pg import enqueue
 
 logger = logging.getLogger(__name__)
 
+# Numero massimo di tentativi per retry in varie operazioni (es. scaricamento modello)
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", 15))
 RETRY_DELAY = float(os.getenv("RETRY_DELAY", 3.0))
 
-
+# ------------------------------------------------------------------------------
+# build_input_tensor_from_payload
+# ------------------------------------------------------------------------------
+# Estrae i dati direttamente dal payload (campo "e") e li converte in un
+# array NumPy della shape richiesta dal modello. Se mancano dati sufficienti,
+# solleva eccezione e si passerà al recupero da InfluxDB.
+# ------------------------------------------------------------------------------
 def build_input_tensor_from_payload(data: dict, structured_features: list, input_shape: list) -> np.ndarray:
     windows, time_steps, _ = input_shape
     sensor_data_map = {}
 
     for record in data.get("e", []):
         sensor = record.get("bn")
-        feature = record.get("n", "")[0] if record.get("n") else None
+        feature = record.get("n") if record.get("n") else None
         value = record.get("v")
         if sensor and feature and isinstance(value, (int, float)):
             sensor_data_map.setdefault(sensor, {}).setdefault(feature, []).append(value)
 
     combined_data = []
-
     for sensor, feats in structured_features:
         partial_data = []
         for feature in feats:
@@ -38,15 +44,18 @@ def build_input_tensor_from_payload(data: dict, structured_features: list, input
             if len(values) < windows * time_steps:
                 raise ValueError(f"Dati insufficienti per {sensor}/{feature}: {len(values)} < {windows * time_steps}")
             partial_data.append(values[:windows * time_steps])
-
-        feature_array = np.stack(partial_data, axis=-1)
-        feature_array = feature_array.reshape(windows, time_steps, len(feats))
+        feature_array = np.stack(partial_data, axis=-1).reshape(windows, time_steps, len(feats))
         combined_data.append(feature_array)
 
     input_tensor = np.concatenate(combined_data, axis=-1)
     return input_tensor
 
-
+# ------------------------------------------------------------------------------
+# prepare_model_local
+# ------------------------------------------------------------------------------
+# Scarica il file del modello se remoto, o verifica se già presente localmente.
+# Supporta URL tipo "file://" per modelli già presenti.
+# ------------------------------------------------------------------------------
 def prepare_model_local(model_meta: dict) -> str:
     model_url = model_meta["url"]
     model_name = model_meta["model_name"]
@@ -58,6 +67,7 @@ def prepare_model_local(model_meta: dict) -> str:
         logger.info(f"[LOCALE] Uso modello locale: {local_path}")
         return local_path
 
+    # Path temporaneo dove salvare modello scaricato
     local_path = os.path.join(tempfile.gettempdir(), model_name)
     if not os.path.exists(local_path):
         logger.info(f"[REMOTE] Scaricamento modello {model_name} da {model_url}")
@@ -67,6 +77,15 @@ def prepare_model_local(model_meta: dict) -> str:
             f.write(response.content)
     return local_path
 
+# ------------------------------------------------------------------------------
+# run_model_handler
+# ------------------------------------------------------------------------------
+# Logica principale per eseguire uno o più modelli compatibili.
+# Supporta due modalità:
+# - selection_mode = "named": esegue solo un modello specifico
+# - selection_mode = "best" o default: esegue tutti quelli compatibili
+# In caso `save=True`, salva anche l’output su InfluxDB.
+# ------------------------------------------------------------------------------
 def run_model_handler(data: Dict, save: bool = True) -> dict:
     try:
         senml_data = SenML(**data)
@@ -92,8 +111,6 @@ def run_model_handler(data: Dict, save: bool = True) -> dict:
         models_to_run = [m for m in compatible_models if m["model_name"] == requested_model]
         if not models_to_run:
             raise HTTPException(status_code=404, detail=f"Modello '{requested_model}' non compatibile")
-    elif selection_mode == "best":
-        models_to_run = [sorted(compatible_models, key=lambda m: m.get("priority", 999))[0]]
     else:
         models_to_run = compatible_models
 
@@ -108,9 +125,11 @@ def run_model_handler(data: Dict, save: bool = True) -> dict:
             local_model_path = prepare_model_local(model_meta)
 
             try:
+                # Tentativo 1: costruzione input direttamente dal payload
                 input_tensor = build_input_tensor_from_payload(data, structured_features, input_shape)
                 logger.info(f"Input costruito dal payload per modello {model_name}")
             except Exception as payload_error:
+                # Tentativo 2: se dati insufficienti, recupera da InfluxDB
                 logger.warning(f"Input insufficiente nel payload per {model_name}: {payload_error}. Recupero da InfluxDB...")
                 combined_data = []
                 for sensor, feats in structured_features:
@@ -122,28 +141,18 @@ def run_model_handler(data: Dict, save: bool = True) -> dict:
             output = load_and_run_model(local_model_path, input_tensor)
             exec_time_ms = (time.perf_counter() - start_exec) * 1000
 
+            # Salvataggio output in InfluxDB (matrice)
             if save:
-                points_to_save = []
-                feature_count = output.shape[1]
+                from influxdbfun import save_model_output_matrix
                 for idx_sensor, (sensor_name, feature_list) in enumerate(structured_features):
-                    usable_features = feature_list[:feature_count]
-                    for feature_idx, feature_name in enumerate(usable_features):
-                        for time_idx in range(output.shape[0]):
-                            points_to_save.append({
-                                "sensor": sensor_name,
-                                "feature": feature_name,
-                                "user_id": user_id,
-                                "execution_id": execution_id,
-                                "model_name": model_name,
-                                "output": float(output[time_idx, feature_idx])
-                            })
-
-                try:
-                    enqueue({"model_output": points_to_save})
-                    logger.info("Output modello accodato con successo per salvataggio asincrono.")
-                except Exception as e:
-                    logger.exception("Impossibile accodare output modello: %s", e)
-                    raise HTTPException(status_code=500, detail="Impossibile accodare l'output del modello")
+                    save_model_output_matrix(
+                        user_id=user_id,
+                        execution_id=execution_id,
+                        model_name=model_name,
+                        sensor=sensor_name,
+                        features=feature_list,
+                        output_matrix=output.tolist()
+                    )
 
             results.append({
                 "model_used": model_meta["url"],
@@ -168,6 +177,6 @@ def run_model_handler(data: Dict, save: bool = True) -> dict:
         "results": results
     }
 
-
+# Alias specifico per l’endpoint /runModelNoSave
 def run_model_no_save_handler(data: Dict) -> dict:
     return run_model_handler(data, save=False)

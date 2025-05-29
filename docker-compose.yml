@@ -1,33 +1,48 @@
+version: "3.9"
+
+# ------------------------------------------------------------------------------
+# COMPOSIZIONE DEI SERVIZI
+# ------------------------------------------------------------------------------
+
 services:
+
+  # ---------------------------------------------------------------------------
+  # FASTAPI + WORKER (8 WORKER PYTHON in background)
+  # ---------------------------------------------------------------------------
   fastapi_app:
-    build: .
+    build: .                                  # Dockerfile nella root
     container_name: fastapi_app
     ports:
-      - "8000:8000"
+      - "8000:8000"                           # Espone l’API su localhost:8000
     volumes:
-      - .:/app
-      - ./tests_locust:/app/tests_locust
+      - .:/app                                # Monta tutto il progetto
+      - ./tests_locust:/app/tests_locust      # Monta test Locust
     env_file:
-      - .env
+      - .env                                  # File con variabili d’ambiente
     depends_on:
       pg_queue:
         condition: service_healthy
       influxdb:
         condition: service_healthy
+      influxdb_init:
+        condition: service_completed_successfully
     command: >
       sh -c "
-      gunicorn -w 8 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:8000 --timeout 120 & 
-      python save_worker_pg.py & 
-      python save_worker_pg.py & 
-      python save_worker_pg.py & 
-      python save_worker_pg.py & 
-      python save_worker_pg.py & 
-      python save_worker_pg.py & 
-      python save_worker_pg.py & 
-      python save_worker_pg.py &&
-      wait
+        gunicorn -w 8 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:8000 --timeout 120 &
+        python save_worker_pg.py &
+        python save_worker_pg.py &
+        python save_worker_pg.py &
+        python save_worker_pg.py &
+        python save_worker_pg.py &
+        python save_worker_pg.py &
+        python save_worker_pg.py &
+        python save_worker_pg.py
+        wait
       "
 
+  # ---------------------------------------------------------------------------
+  # POSTGRESQL per la coda asincrona
+  # ---------------------------------------------------------------------------
   pg_queue:
     image: postgres:15
     container_name: pg_queue
@@ -37,15 +52,19 @@ services:
       - POSTGRES_USER=${PG_USER}
       - POSTGRES_PASSWORD=${PG_PASSWORD}
     ports:
-      - "5432:5432"
+      - "5432:5432"                           # Espone porta locale per debug
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql  # Crea DB + tabella
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U api -d api_queue || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 15
+
+  # ---------------------------------------------------------------------------
+  # INFLUXDB OSS 2.7 per dati sensoriali e output modello
+  # ---------------------------------------------------------------------------
   influxdb:
     image: influxdb:2.7
     container_name: influxdb
@@ -66,6 +85,30 @@ services:
       timeout: 3s
       retries: 10
 
+  # ---------------------------------------------------------------------------
+  # INFLUXDB INIT (Crea bucket "model_results" se non esiste)
+  # ---------------------------------------------------------------------------
+  influxdb_init:
+    image: python:3.11-slim
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    volumes:
+      - ./init_influxdb.py:/init_influxdb.py
+    environment:
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      - INFLUXDB_ORG=${INFLUXDB_ORG}
+    command: >
+      sh -c "
+        pip install influxdb-client==1.41.0 &&
+        python /init_influxdb.py
+      "
+
+# ------------------------------------------------------------------------------
+# VOLUMI PERSISTENTI
+# ------------------------------------------------------------------------------
 volumes:
   pg_data:
   influxdb_data:
+  mongodb_data:

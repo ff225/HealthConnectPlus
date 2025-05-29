@@ -6,15 +6,27 @@ from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
-# Cache interna solo per query Influx
+# === CRUD: GESTIONE MODELLI COMPATIBILI E QUERY SENSORIALI ===
+# Questo modulo contiene la logica per:
+# - interrogare InfluxDB per sensori/feature disponibili
+# - identificare i modelli compatibili da MongoDB
+# Viene usato da /getModels e run_model.py
+
+# Cache temporanea per evitare richieste duplicate a InfluxDB
 _cached_sensors_features = {}
 
 @lru_cache(maxsize=128)
 def _cached_sensor_features(user_id: str, execution_id: str):
+    """
+    Restituisce sensori/feature da InfluxDB con caching LRU (max 128 combinazioni).
+    """
     return get_sensors_and_features_from_influx(user_id, execution_id)
 
-#@lru_cache(maxsize=1)
 def _load_all_models():
+    """
+    Recupera tutti i modelli salvati su MongoDB.
+    Campo usato da runModel e /getModels.
+    """
     return list(collectionM.find({}, {
         "sensors": 1,
         "features": 1,
@@ -22,11 +34,19 @@ def _load_all_models():
         "model_name": 1,
         "input_shape": 1,
         "execution_requirements": 1,
-        "priority": 1,
         "description": 1
     }))
 
 def get_sensors_and_features_from_influx(user_id: str, execution_id: str) -> Dict[str, set]:
+    """
+    Interroga InfluxDB per determinare sensori e feature realmente salvate.
+
+    Output: dizionario del tipo
+    {
+      "leftwrist": {"accX", "accY", ...},
+      "rightpocket": {"gyroZ", ...}
+    }
+    """
     query = f'''
     from(bucket: "{INFLUXDB_BUCKET}")
       |> range(start: -4d)
@@ -52,12 +72,16 @@ def get_sensors_and_features_from_influx(user_id: str, execution_id: str) -> Dic
 
 def find_compatible_module(data: SenML) -> Dict[str, Any]:
     """
-    Trova i modelli compatibili dato un payload SenML o user_id/execution_id.
+    Trova i modelli compatibili dato un oggetto SenML.
+
+    Funziona in 2 modalità:
+    - Se data.e è presente → usa direttamente sensori/feature del payload
+    - Altrimenti → recupera sensori/feature da InfluxDB (via user_id, execution_id)
     """
     user_id = data.effective_user_id
     execution_id = data.effective_execution_id
 
-    # Ricavo sensori e features disponibili
+    # --- Rilevamento sensori e feature disponibili
     if data.e:
         sensor_features = {}
         for entry in data.e:
@@ -74,6 +98,7 @@ def find_compatible_module(data: SenML) -> Dict[str, Any]:
         logger.warning("Nessun sensore/feature trovato disponibile.")
         return {"models": []}
 
+    # --- Verifica modelli compatibili
     matching_models = []
 
     for model in _load_all_models():
@@ -91,6 +116,7 @@ def find_compatible_module(data: SenML) -> Dict[str, Any]:
         is_compatible = True
 
         try:
+            # Caso: features raggruppate per sensore
             if isinstance(model_features[0], list):
                 if len(model_sensors) != len(model_features):
                     logger.warning("Mismatch numero sensori/features su modello %s", model_name)
@@ -101,6 +127,7 @@ def find_compatible_module(data: SenML) -> Dict[str, Any]:
                         is_compatible = False
                         break
                     structured_features.append((sensor, feats))
+            # Caso legacy: singolo sensore e lista flat di feature
             else:
                 sensor = model_sensors[0]
                 feats = model_features
@@ -110,6 +137,7 @@ def find_compatible_module(data: SenML) -> Dict[str, Any]:
                 else:
                     structured_features.append((sensor, feats))
 
+            # Se compatibile → aggiungi
             if is_compatible:
                 matching_models.append({
                     "url": model_url,

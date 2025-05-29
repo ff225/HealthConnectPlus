@@ -4,17 +4,23 @@ import time
 import psycopg2
 import json
 
-# --- Lettura sicura delle variabili ambiente ---
+# ==============================================================================
+# CONFIGURAZIONE CONNESSIONE POSTGRESQL
+# ==============================================================================
+
+# Variabili ambiente per configurare la connessione al database PostgreSQL
 PG_DB = os.getenv("PG_DB", "api_queue")
 PG_USER = os.getenv("PG_USER", "api")
 PG_PASSWORD = os.getenv("PG_PASSWORD", "test")
 PG_HOST = os.getenv("PG_HOST", "localhost")
 PG_PORT = int(os.getenv("PG_PORT", 5432))
 
+# Controllo critico: PG_DB deve essere sempre presente
 if not PG_DB:
     print("ERRORE: la variabile d'ambiente PG_DB non è definita. Interrompo.")
     sys.exit(1)
 
+# Parametri di connessione usati da tutte le funzioni
 DB_PARAMS = {
     "host": PG_HOST,
     "port": PG_PORT,
@@ -23,7 +29,12 @@ DB_PARAMS = {
     "password": PG_PASSWORD
 }
 
-# --- Connessione con retry ---
+# ------------------------------------------------------------------------------
+# get_conn
+# ------------------------------------------------------------------------------
+# Ritorna una connessione attiva a PostgreSQL, con retry in caso di errore.
+# Usata internamente da tutte le funzioni di enqueue/dequeue.
+# ------------------------------------------------------------------------------
 def get_conn(retries=10, delay=2):
     for i in range(retries):
         try:
@@ -33,7 +44,12 @@ def get_conn(retries=10, delay=2):
             time.sleep(delay)
     raise ConnectionError("Impossibile connettersi a PostgreSQL dopo vari tentativi.")
 
-# --- Inserisce un payload nella coda ---
+# ------------------------------------------------------------------------------
+# enqueue
+# ------------------------------------------------------------------------------
+# Inserisce un nuovo payload JSON nella tabella `data_queue`, marcandolo
+# automaticamente come `processed = FALSE`. La serializzazione è protetta.
+# ------------------------------------------------------------------------------
 def enqueue(payload_dict):
     try:
         json_payload = json.dumps(payload_dict)
@@ -46,7 +62,13 @@ def enqueue(payload_dict):
             cur.execute("INSERT INTO data_queue (payload) VALUES (%s)", (json_payload,))
         conn.commit()
 
-# --- Estrae un batch di payload non ancora processati ---
+# ------------------------------------------------------------------------------
+# dequeue
+# ------------------------------------------------------------------------------
+# Estrae un batch di payload dalla tabella `data_queue`, marcandoli subito come
+# `processed = TRUE` per evitare doppio uso. Usa FOR UPDATE SKIP LOCKED per
+# supportare accesso concorrente da più worker.
+# ------------------------------------------------------------------------------
 def dequeue(batch_size=1):
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -69,7 +91,7 @@ def dequeue(batch_size=1):
             for r in rows:
                 raw = r[1]
                 try:
-                    # Se è già dict (es. da JSONB), lo usi direttamente
+                    # payload può essere stringa JSON o già dict
                     if isinstance(raw, dict):
                         result.append(raw)
                     else:
@@ -78,7 +100,12 @@ def dequeue(batch_size=1):
                     print(f"[ERRORE] Payload malformato in dequeue (ID {r[0]}): {e}")
             return result
 
-# --- Conta quanti payload sono in attesa nella coda ---
+# ------------------------------------------------------------------------------
+# queue_length
+# ------------------------------------------------------------------------------
+# Conta quanti payload sono ancora in attesa (processed = FALSE)
+# Utile per monitoraggio o metriche di coda.
+# ------------------------------------------------------------------------------
 def queue_length():
     with get_conn() as conn:
         with conn.cursor() as cur:

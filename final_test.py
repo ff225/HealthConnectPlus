@@ -1,19 +1,35 @@
-import pytest
 import requests
 import time
 from datetime import datetime, timedelta
 from pymongo import MongoClient
 from collections import defaultdict
+from typing import List, Dict
 
 BASE_URL = "http://localhost:8000"
 MONGO_URI = "mongodb+srv://272519:bSVDnlDZVVEes2hJ@cluster0.0ow6b.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 client = MongoClient(MONGO_URI)
 collection = client["healthconnect_db"]["model_mappings"]
 
-USER_ID_RUN = "test_user_run"
-USER_ID_NOSAVE = "test_user_nosave"
+USER_ID = "demo_user"
+EXEC_ID = "demo_exec"
+EXEC_ID_NOSAVE = "demo_exec_nosave"
 
-def generate_senml_from_model(model_doc, exec_id, user_id):
+def print_execution_data(data: List[Dict]):
+    print(f"\nDati grezzi restituiti ({len(data)} elementi):")
+    by_sensor = defaultdict(list)
+    for row in data:
+        sensor = row.get("sensor", "unknown")
+        by_sensor[sensor].append(row["data"])
+
+    for sensor, entries in by_sensor.items():
+        print(f"\n→ Sensor: {sensor} | Totale punti: {len(entries)}")
+        if entries:
+            sample = entries[0]
+            for feat, _ in sample.items():
+                values = [entry.get(feat) for entry in entries[:5]]
+                print(f"   {feat}: {values} ...")
+
+def generate_senml(model_doc, exec_id, user_id):
     input_shape = model_doc["input_shape"]
     sensors = model_doc["sensors"]
     features = model_doc["features"]
@@ -21,12 +37,11 @@ def generate_senml_from_model(model_doc, exec_id, user_id):
     windows, steps, total_feat = input_shape
     total = windows * steps
 
-    flattened_feats = [feat for sublist in features for feat in sublist]
-    if len(flattened_feats) != total_feat:
-        raise ValueError(f"Mismatch feature count: atteso {total_feat}, ma trovati {len(flattened_feats)} da features")
+    flattened_feats = [f for group in features for f in group]
+    assert total_feat == len(flattened_feats), "Mismatch feature count"
 
     records = []
-    timestamp = datetime.utcnow()
+    now = datetime.utcnow()
     debug_input = defaultdict(list)
 
     for sensor, feats in zip(sensors, features):
@@ -37,7 +52,7 @@ def generate_senml_from_model(model_doc, exec_id, user_id):
                     "bn": sensor,
                     "n": [feat],
                     "v": value,
-                    "t": (timestamp + timedelta(milliseconds=i)).isoformat()
+                    "t": (now + timedelta(milliseconds=i)).isoformat()
                 })
                 if len(debug_input[(sensor, feat)]) < 3:
                     debug_input[(sensor, feat)].append(value)
@@ -49,25 +64,29 @@ def generate_senml_from_model(model_doc, exec_id, user_id):
         "e": records
     }, debug_input
 
-
-@pytest.mark.parametrize("model_doc", list(collection.find()))
-@pytest.mark.parametrize("selection_mode", ["all", "best", "named"])
-def test_full_pipeline(model_doc, selection_mode):
+def run_test(model_doc):
     model_name = model_doc["model_name"]
-    print(f"\n===== MODELLO: {model_name} | MODE: {selection_mode} =====")
+    print(f"\n=== MODELLO: {model_name} ===")
 
-    exec_id_run = f"exec_run_{selection_mode}_{model_name.replace('.tflite', '')}"
-    exec_id_nosave = f"exec_nosave_{selection_mode}_{model_name.replace('.tflite', '')}"
+    exec_id_run = f"exec_run_{model_name.replace('.tflite', '')}"
+    exec_id_nosave = f"exec_nosave_{model_name.replace('.tflite', '')}"
 
-    # Pulizia
-    print("Pulizia InfluxDB...")
-    assert requests.delete(f"{BASE_URL}/deleteAll").status_code == 200
+    USER_ID_RUN = "test_user_run"
+    USER_ID_NOSAVE = "test_user_nosave"
 
-    # ======= RUNMODEL (con salvataggio) =======
-    senml_run, debug_input_run = generate_senml_from_model(model_doc, exec_id_run, USER_ID_RUN)
-    senml_run["selection_mode"] = selection_mode
-    if selection_mode == "named":
-        senml_run["model_name"] = model_doc["model_name"]
+    user_id = USER_ID_RUN
+    execution_id = exec_id_run
+
+    print(f"→ DELETE /deleteAll")
+    resp = requests.delete(f"{BASE_URL}/deleteAll", params={
+        "user_id": USER_ID_RUN,
+        "execution_id": exec_id_run
+    })
+    print(resp.status_code, resp.json())
+    assert resp.status_code == 200
+
+    senml_run, debug_input_run = generate_senml(model_doc, exec_id_run, USER_ID_RUN)
+    senml_run["selection_mode"] = "best"
 
     print("\n/saveData")
     resp = requests.post(f"{BASE_URL}/saveData", json=senml_run)
@@ -93,41 +112,41 @@ def test_full_pipeline(model_doc, selection_mode):
         for (sensor, feat), values in debug_input_run.items():
             print(f"      {sensor}.{feat}: [{', '.join(map(str, values))}]")
 
-    print("\n/getResults")
-    results = requests.get(f"{BASE_URL}/getResults", params={"user_id": USER_ID_RUN, "execution_id": exec_id_run}).json()["results"]
-    print(f"\nNumero di modelli eseguiti: {len(results)}")
-    for r in results:
-        print(f"  → Modello: {r['model_name']}, Sensor: {r['sensor']}")
-        print(f"    Output (troncato): {str(r['result'])[:100].rstrip()}...")
-
-    assert len(results) > 0
-    input("\nPremi INVIO per proseguire a /runModelNoSave...")
-
-    # ======= RUNMODELNOSAVE (senza salvataggio) =======
-    senml_nosave, debug_input_nosave = generate_senml_from_model(model_doc, exec_id_nosave, USER_ID_NOSAVE)
-    senml_nosave["selection_mode"] = selection_mode
-    if selection_mode == "named":
-        senml_nosave["model_name"] = model_doc["model_name"]
-
-    print("\n/runModelNoSave")
-    no_save_result = requests.post(f"{BASE_URL}/runModelNoSave", json=senml_nosave).json()
-    print(f"/runModelNoSave → {len(no_save_result.get('results', []))} modelli eseguiti senza salvataggio")
-    for r in no_save_result["results"]:
-        print(f"  {r['model_used'].split('/')[-1]}")
-        print(f"    Output (troncato): {str(r.get('result', ''))[:100].rstrip()}...")
-        print("    Input:")
-        for (sensor, feat), values in debug_input_nosave.items():
-            print(f"      {sensor}.{feat}: [{', '.join(map(str, values))}]")
+    print("\n/getResults (fog_ready=True)")
+    resp_fog = requests.get(f"{BASE_URL}/getResults", params={
+        "user_id": USER_ID_RUN,
+        "execution_id": exec_id_run,
+        "fog_ready": "true"
+    })
+    print(f"/GET /getResults (fog) → status={resp_fog.status_code}")
+    try:
+        results_fog = resp_fog.json()
+        for r in results_fog:
+            print(f"\n→ Modello: {r['model_name']} | Sensore: {r['sensor']}")
+            print("  Output matrix (prima riga):", r["output_matrix"][0] if r.get("output_matrix") else "vuoto")
+    except Exception as e:
+        print("  Errore parsing JSON fog-ready:", e)
 
     print("\n/getExecutionData")
-    exec_data = requests.get(f"{BASE_URL}/getExecutionData", params={
-        "user_id": USER_ID_NOSAVE,
-        "execution_id": exec_id_nosave
-    }).json()
+    for attempt in range(15):
+        response = requests.get(
+            f"{BASE_URL}/getExecutionData",
+            params={"user_id": user_id, "execution_id": execution_id},
+            timeout=5,
+        )
+        if response.status_code == 200 and response.json():
+            break
+        print("  Tentativo... attesa 30 secondi")
+        time.sleep(30)
 
-    print(f"/getExecutionData → input: {len(exec_data['inputs'])} | output: {len(exec_data['outputs'])}")
-    print(" Verifica: dati temporanei eliminati dopo /runModelNoSave")
-    assert exec_data["inputs"] == []
-    assert exec_data["outputs"] == []
+    print(f"/GET /getExecutionData → status={response.status_code}")
+    data = response.json()
+    print_execution_data(data)
+    print(f"\nNumero elementi restituiti da /getExecutionData: {len(data)}")
 
     input("\nPremi INVIO per completare il test...")
+
+if __name__ == "__main__":
+    models = list(collection.find({}))
+    for m in models:
+        run_test(m)

@@ -8,6 +8,8 @@ RUN pip install gunicorn
 
 COPY . .
 
+RUN apt-get update && apt-get install -y curl
+
 ENV PYTHONUNBUFFERED=1
 
 CMD ["gunicorn", "-w", "8", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--bind", "0.0.0.0:8000"]

@@ -5,11 +5,29 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------
+# Funzione: get_feature_data
+# ---------------------------------------------------------------------
+# Scopo:
+# Recupera i dati grezzi da InfluxDB per un dato sensore e lista di feature.
+# I dati vengono scaricati in parallelo (1 thread per feature) e organizzati
+# in un array NumPy con shape compatibile con i modelli TFLite.
+#
+# Parametri:
+# - sensor: nome del sensore (es. "leftwrist")
+# - fields: lista delle feature richieste (es. ["accX", "gyroY", ...])
+# - input_shape: shape attesa dal modello (es. [1, 50, 6])
+# - user_id, execution_id: chiavi per recuperare i dati da InfluxDB
+#
+# Output:
+# - array NumPy (shape=input_shape) pronto per essere passato al modello
+# ---------------------------------------------------------------------
 def get_feature_data(sensor: str, fields: list[str], input_shape: list[int], user_id: str, execution_id: str) -> np.ndarray:
     time_steps, windows = input_shape[1], input_shape[0]
     total_per_feature = windows * time_steps
     all_data = []
 
+    # Funzione interna: esegue la query Influx per una singola feature
     def fetch_feature(field: str) -> list[float]:
         query = f'''
         from(bucket: "{INFLUXDB_BUCKET}")
@@ -28,19 +46,34 @@ def get_feature_data(sensor: str, fields: list[str], input_shape: list[int], use
             raise ValueError(f"Dati insufficienti per {sensor}/{field}: {len(numeric_values)} < {total_per_feature}")
         return numeric_values[:total_per_feature]
 
+    # Parallelizza le chiamate Influx usando un thread per feature
     with ThreadPoolExecutor(max_workers=len(fields)) as executor:
         futures = {executor.submit(fetch_feature, f): f for f in fields}
         for fut in as_completed(futures):
             all_data.append(fut.result())
 
+    # Costruzione finale dell'array NumPy
     try:
-        data = np.array(all_data, dtype=np.float32).T
-        reshaped = data.reshape(input_shape)
+        data = np.array(all_data, dtype=np.float32).T  # Trasposizione: righe = tempo, colonne = feature
+        reshaped = data.reshape(input_shape)           # Reshape finale per il modello
         return reshaped
     except Exception as e:
         logger.exception("Errore durante reshape NumPy")
         raise ValueError(f"Errore nella creazione dell'array NumPy per {sensor}: {e}")
 
+# ---------------------------------------------------------------------
+# Funzione: load_and_run_model
+# ---------------------------------------------------------------------
+# Scopo:
+# Carica ed esegue un modello TFLite con input NumPy già formattato.
+#
+# Parametri:
+# - model_path: path del file .tflite
+# - input_data: array NumPy compatibile con il modello
+#
+# Output:
+# - array NumPy con output del modello
+# ---------------------------------------------------------------------
 def load_and_run_model(model_path: str, input_data: np.ndarray) -> np.ndarray:
     import tensorflow.lite as tflite
 
