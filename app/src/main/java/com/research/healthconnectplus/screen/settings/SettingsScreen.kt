@@ -216,32 +216,42 @@ fun SettingsScreen(navController: NavController? = null) {
 
             // Example model cards
             ModelCard(
-                modelName = "CNN Right Pocket",
-                description = "Activity recognition using phone accelerometer in right pocket",
-                result = "Not executed yet",
+                modelName = "Heart Rate Anomaly Detection",
+                description = "Detects irregular heart rate patterns during physical activity",
+                result = "Last: Normal (98.5% confidence)",
                 isLocal = true,
                 onExecutionModeChange = { isLocal ->
-                    Log.d("SettingsScreen", "CNN Right Pocket: ${if (isLocal) "Local" else "Fog"}")
+                    Log.d("SettingsScreen", "HR Anomaly: ${if (isLocal) "Local" else "Fog"}")
                 }
             )
 
             ModelCard(
-                modelName = "CNN Left Wrist",
-                description = "Activity recognition using wrist-worn sensor data",
-                result = "Last: Walking (95.2% confidence)",
+                modelName = "Activity + HR Classification",
+                description = "Combines heart rate and step count to classify workout intensity",
+                result = "Last: Moderate Intensity (92.3% confidence)",
                 isLocal = false,
                 onExecutionModeChange = { isLocal ->
-                    Log.d("SettingsScreen", "CNN Left Wrist: ${if (isLocal) "Local" else "Fog"}")
+                    Log.d("SettingsScreen", "Activity+HR: ${if (isLocal) "Local" else "Fog"}")
                 }
             )
 
             ModelCard(
-                modelName = "CNN Multi-Sensor",
-                description = "Combined analysis from pocket and wrist sensors",
+                modelName = "Cardio Fitness Estimator",
+                description = "Estimates cardiovascular fitness level based on HR response to activity",
                 result = "Not executed yet",
                 isLocal = true,
                 onExecutionModeChange = { isLocal ->
-                    Log.d("SettingsScreen", "CNN Multi-Sensor: ${if (isLocal) "Local" else "Fog"}")
+                    Log.d("SettingsScreen", "Cardio Fitness: ${if (isLocal) "Local" else "Fog"}")
+                }
+            )
+
+            ModelCard(
+                modelName = "Recovery Time Predictor",
+                description = "Predicts recovery time after exercise based on HR and activity data",
+                result = "Last: 12 minutes (89.7% confidence)",
+                isLocal = false,
+                onExecutionModeChange = { isLocal ->
+                    Log.d("SettingsScreen", "Recovery: ${if (isLocal) "Local" else "Fog"}")
                 }
             )
 
@@ -357,19 +367,19 @@ fun ModelCard(
             Spacer(modifier = Modifier.height(12.dp))
 
             // Execution Mode Toggle
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
                     text = "Execution Mode:",
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(bottom = 8.dp)
                 )
 
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Button(
                         onClick = {
