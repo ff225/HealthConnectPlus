@@ -27,4 +27,9 @@ interface MovesenseDAO {
 
     @Query("SELECT * FROM movesense_record WHERE is_synced = 0")
     fun fetchCursor(): Cursor
+
+    @Query("SELECT * FROM movesense_record WHERE is_synced = 0 ORDER BY id ASC LIMIT :limit")
+    suspend fun getUnsyncedRecordsWithLimit(limit: Int): List<MovesenseRecord>
+
+    //
 }

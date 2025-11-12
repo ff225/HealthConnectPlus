@@ -15,4 +15,11 @@ interface StepDAO : GenericDAO<StepRecord> {
 
     @Query("SELECT * FROM step_records WHERE is_synced = 0")
     fun fetchCursor(): Cursor
+
+    @Query("SELECT * FROM step_records WHERE is_synced = 0 ORDER BY id ASC LIMIT :limit")
+    suspend fun getUnsyncedStepRecordsWithLimit(limit: Int): List<StepRecord>
+
+    // 🆕 NUOVO: Cursor con limit per benchmark equi
+    @Query("SELECT * FROM step_records WHERE is_synced = 0 ORDER BY id ASC LIMIT :limit")
+    fun fetchCursorWithLimit(limit: Int): Cursor
 }
