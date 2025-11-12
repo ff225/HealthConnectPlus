@@ -220,8 +220,12 @@ fun SettingsScreen(navController: NavController? = null) {
                 description = "Detects irregular heart rate patterns during physical activity",
                 result = "Last: Normal (98.5% confidence)",
                 isLocal = true,
+                isEnabled = true,
                 onExecutionModeChange = { isLocal ->
                     Log.d("SettingsScreen", "HR Anomaly: ${if (isLocal) "Local" else "Fog"}")
+                },
+                onEnabledChange = { enabled ->
+                    Log.d("SettingsScreen", "HR Anomaly Detection ${if (enabled) "enabled" else "disabled"}")
                 }
             )
 
@@ -230,8 +234,12 @@ fun SettingsScreen(navController: NavController? = null) {
                 description = "Combines heart rate and step count to classify workout intensity",
                 result = "Last: Moderate Intensity (92.3% confidence)",
                 isLocal = false,
+                isEnabled = true,
                 onExecutionModeChange = { isLocal ->
                     Log.d("SettingsScreen", "Activity+HR: ${if (isLocal) "Local" else "Fog"}")
+                },
+                onEnabledChange = { enabled ->
+                    Log.d("SettingsScreen", "Activity+HR Classification ${if (enabled) "enabled" else "disabled"}")
                 }
             )
 
@@ -240,8 +248,12 @@ fun SettingsScreen(navController: NavController? = null) {
                 description = "Estimates cardiovascular fitness level based on HR response to activity",
                 result = "Not executed yet",
                 isLocal = true,
+                isEnabled = false,
                 onExecutionModeChange = { isLocal ->
                     Log.d("SettingsScreen", "Cardio Fitness: ${if (isLocal) "Local" else "Fog"}")
+                },
+                onEnabledChange = { enabled ->
+                    Log.d("SettingsScreen", "Cardio Fitness Estimator ${if (enabled) "enabled" else "disabled"}")
                 }
             )
 
@@ -250,8 +262,12 @@ fun SettingsScreen(navController: NavController? = null) {
                 description = "Predicts recovery time after exercise based on HR and activity data",
                 result = "Last: 12 minutes (89.7% confidence)",
                 isLocal = false,
+                isEnabled = false,
                 onExecutionModeChange = { isLocal ->
                     Log.d("SettingsScreen", "Recovery: ${if (isLocal) "Local" else "Fog"}")
+                },
+                onEnabledChange = { enabled ->
+                    Log.d("SettingsScreen", "Recovery Time Predictor ${if (enabled) "enabled" else "disabled"}")
                 }
             )
 
@@ -313,9 +329,12 @@ fun ModelCard(
     description: String = "",
     result: String = "Not executed yet",
     isLocal: Boolean = true,
-    onExecutionModeChange: (Boolean) -> Unit = {}
+    isEnabled: Boolean = false,
+    onExecutionModeChange: (Boolean) -> Unit = {},
+    onEnabledChange: (Boolean) -> Unit = {}
 ) {
     var executionMode by remember { mutableStateOf(isLocal) }
+    var enabled by remember { mutableStateOf(isEnabled) }
 
     Card(
         modifier = Modifier
@@ -327,13 +346,28 @@ fun ModelCard(
                 .fillMaxWidth()
                 .padding(12.dp)
         ) {
-            // Model Name
-            Text(
-                text = modelName,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp,
-                modifier = Modifier.padding(bottom = 4.dp)
-            )
+            // Model Name and Enable Switch
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = modelName,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    modifier = Modifier
+                        .padding(bottom = 4.dp)
+                        .weight(1f)
+                )
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = { newValue ->
+                        enabled = newValue
+                        onEnabledChange(newValue)
+                    }
+                )
+            }
 
             // Description
             Text(
@@ -426,9 +460,10 @@ fun ModelCard(
 @Composable
 fun ModelCardPreview() {
     ModelCard(
-        modelName = "CNN Right Pocket",
-        description = "Activity recognition using phone accelerometer in right pocket",
-        result = "Last: Running (87.5% confidence)",
-        isLocal = true
+        modelName = "Heart Rate Anomaly Detection",
+        description = "Detects irregular heart rate patterns during physical activity",
+        result = "Last: Normal (98.5% confidence)",
+        isLocal = true,
+        isEnabled = true
     )
 }
