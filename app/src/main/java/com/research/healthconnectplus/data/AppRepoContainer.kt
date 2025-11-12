@@ -9,6 +9,7 @@ interface AppRepoContainer {
     val movesenseRepository: MovesenseRepository
     val predictionRepository: PredictionRepository
     val userRepository: UserRepository
+    val inferenceTimeRepository: InferenceTimeRepository
 }
 
 
@@ -29,7 +30,11 @@ class AppRepoContainerImpl(context: Context) : AppRepoContainer {
     override val predictionRepository: PredictionRepository by lazy {
         PredictionRepository(HCPlusDatabase.getDatabase(context).predictionDAO())
     }
-    override val userRepository: UserRepository  by lazy {
+    override val userRepository: UserRepository by lazy {
         UserRepository(HCPlusDatabase.getDatabase(context).userDAO())
+    }
+
+    override val inferenceTimeRepository: InferenceTimeRepository by lazy {
+        InferenceTimeRepository(HCPlusDatabase.getDatabase(context).inferenceTimeDAO())
     }
 }

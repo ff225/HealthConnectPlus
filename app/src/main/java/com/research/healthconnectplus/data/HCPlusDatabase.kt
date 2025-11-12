@@ -6,8 +6,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [StepRecord::class, HeartRecord::class, MovesenseRecord::class, PredictionRecord::class, UserInfo::class],
-    version = 1,
+    entities = [StepRecord::class, HeartRecord::class, MovesenseRecord::class, PredictionRecord::class, UserInfo::class, InferenceTimeRecord::class],
+    version = 2,
     exportSchema = false
 )
 abstract class HCPlusDatabase : RoomDatabase() {
@@ -16,6 +16,7 @@ abstract class HCPlusDatabase : RoomDatabase() {
     abstract fun movesenseDAO(): MovesenseDAO
     abstract fun predictionDAO(): PredictionDAO
     abstract fun userDAO(): UserDao
+    abstract fun inferenceTimeDAO(): InferenceTimeDAO
 
     companion object {
 
