@@ -5,13 +5,21 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -77,6 +85,7 @@ fun SettingsScreen(navController: NavController? = null) {
             Modifier
                 .padding(it)
                 .fillMaxSize()
+                .verticalScroll(rememberScrollState())
         ) {
             Text(
                 "Activate or deactivate data collection",
@@ -192,6 +201,50 @@ fun SettingsScreen(navController: NavController? = null) {
                 }
             }
 
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // ML Models Section
+            Text(
+                "Available ML Models",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .padding(8.dp)
+                    .fillMaxWidth()
+            )
+
+            // Example model cards
+            ModelCard(
+                modelName = "CNN Right Pocket",
+                description = "Activity recognition using phone accelerometer in right pocket",
+                result = "Not executed yet",
+                isLocal = true,
+                onExecutionModeChange = { isLocal ->
+                    Log.d("SettingsScreen", "CNN Right Pocket: ${if (isLocal) "Local" else "Fog"}")
+                }
+            )
+
+            ModelCard(
+                modelName = "CNN Left Wrist",
+                description = "Activity recognition using wrist-worn sensor data",
+                result = "Last: Walking (95.2% confidence)",
+                isLocal = false,
+                onExecutionModeChange = { isLocal ->
+                    Log.d("SettingsScreen", "CNN Left Wrist: ${if (isLocal) "Local" else "Fog"}")
+                }
+            )
+
+            ModelCard(
+                modelName = "CNN Multi-Sensor",
+                description = "Combined analysis from pocket and wrist sensors",
+                result = "Not executed yet",
+                isLocal = true,
+                onExecutionModeChange = { isLocal ->
+                    Log.d("SettingsScreen", "CNN Multi-Sensor: ${if (isLocal) "Local" else "Fog"}")
+                }
+            )
+
         }
     }
 }
@@ -241,5 +294,131 @@ fun SettingsScreenContent(
 fun SettingsScreenContentPreview() {
     SettingsScreenContent(
         "Heart Rate"
+    )
+}
+
+@Composable
+fun ModelCard(
+    modelName: String = "",
+    description: String = "",
+    result: String = "Not executed yet",
+    isLocal: Boolean = true,
+    onExecutionModeChange: (Boolean) -> Unit = {}
+) {
+    var executionMode by remember { mutableStateOf(isLocal) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(8.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp)
+        ) {
+            // Model Name
+            Text(
+                text = modelName,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+
+            // Description
+            Text(
+                text = description,
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
+            // Divider
+            Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+            // Result
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Result:",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                )
+                Text(
+                    text = result,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Execution Mode Toggle
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Execution Mode:",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                )
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            executionMode = true
+                            onExecutionModeChange(true)
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (executionMode) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = "Local",
+                            color = if (executionMode) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            executionMode = false
+                            onExecutionModeChange(false)
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (!executionMode) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = "Fog",
+                            color = if (!executionMode) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Preview
+@Composable
+fun ModelCardPreview() {
+    ModelCard(
+        modelName = "CNN Right Pocket",
+        description = "Activity recognition using phone accelerometer in right pocket",
+        result = "Last: Running (87.5% confidence)",
+        isLocal = true
     )
 }
