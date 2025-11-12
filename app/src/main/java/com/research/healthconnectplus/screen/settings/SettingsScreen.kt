@@ -218,7 +218,7 @@ fun SettingsScreen(navController: NavController? = null) {
             ModelCard(
                 modelName = "Heart Rate Anomaly Detection",
                 description = "Detects irregular heart rate patterns during physical activity",
-                result = "Last: Normal (98.5% confidence)",
+                result = "Not executed yet",
                 isLocal = true,
                 isEnabled = true,
                 onExecutionModeChange = { isLocal ->
@@ -232,7 +232,7 @@ fun SettingsScreen(navController: NavController? = null) {
             ModelCard(
                 modelName = "Activity + HR Classification",
                 description = "Combines heart rate and step count to classify workout intensity",
-                result = "Last: Moderate Intensity (92.3% confidence)",
+                result = "Not executed yet",
                 isLocal = false,
                 isEnabled = true,
                 onExecutionModeChange = { isLocal ->
@@ -260,7 +260,7 @@ fun SettingsScreen(navController: NavController? = null) {
             ModelCard(
                 modelName = "Recovery Time Predictor",
                 description = "Predicts recovery time after exercise based on HR and activity data",
-                result = "Last: 12 minutes (89.7% confidence)",
+                result = "Not executed yet",
                 isLocal = false,
                 isEnabled = false,
                 onExecutionModeChange = { isLocal ->
