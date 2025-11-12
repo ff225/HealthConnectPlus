@@ -30,7 +30,12 @@ abstract class HCPlusDatabase : RoomDatabase() {
                     context.applicationContext,
                     HCPlusDatabase::class.java,
                     "hcplus_database"
-                ).build().also {
+                )
+                    // TODO: Remove fallbackToDestructiveMigration in production.
+                    // This is a temporary fix for development to handle database version conflicts.
+                    // Proper migrations should be implemented for production releases.
+                    .fallbackToDestructiveMigration()
+                    .build().also {
                     INSTANCE = it
                 }
 
