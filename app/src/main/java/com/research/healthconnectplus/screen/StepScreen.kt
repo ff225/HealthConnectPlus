@@ -43,7 +43,7 @@ fun StepScreen(navController: NavController? = null) {
     val preferencesManager = PreferencesManager(context)
 
     var sendStepData by remember {
-        mutableStateOf(preferencesManager.getSendStepData())
+        mutableStateOf(preferencesManager.getCollectStepData())
     }
 
     MyScaffold(
@@ -95,7 +95,7 @@ fun StepScreen(navController: NavController? = null) {
                 Text("Send data periodically to the server", Modifier.padding(8.dp))
                 Switch(checked = sendStepData, onCheckedChange = { newValue ->
                     sendStepData = newValue
-                    preferencesManager.setSendStepData(newValue)
+                    preferencesManager.setCollectStepData(newValue)
 
                     if (newValue) {
                         WorkManager.getInstance(context)
