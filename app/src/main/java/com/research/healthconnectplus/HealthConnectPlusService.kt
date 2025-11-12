@@ -12,6 +12,7 @@ import com.research.healthconnectplus.workers.HCReadHeartRate
 import com.research.healthconnectplus.workers.HCReadSteps
 import java.util.concurrent.TimeUnit
 
+// TODO for movesense, use it to keep connection alive
 class HealthConnectPlusService : Service() {
     override fun onBind(p0: Intent?): IBinder? {
         return null
@@ -49,8 +50,8 @@ class HealthConnectPlusService : Service() {
         super.onDestroy()
         Log.d("HealthConnectPlusService", "Service destroyed")
 
-        WorkManager.getInstance(this).cancelUniqueWork("HCReadSteps")
-        WorkManager.getInstance(this).cancelUniqueWork("HCReadHeartRate")
+        //WorkManager.getInstance(this).cancelUniqueWork("HCReadSteps")
+        //WorkManager.getInstance(this).cancelUniqueWork("HCReadHeartRate")
         WorkManager.getInstance(this).cancelAllWorkByTag("MovesenseStoreDataWorker")
         // For movesense work, stop logging then stop store data worker
 
